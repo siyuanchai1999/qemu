@@ -21,6 +21,8 @@
 #include "cpu.h"
 #include "tcg/helper-tcg.h"
 
+#define TARGET_X86_64_ECPT 1
+
 int get_pg_mode(CPUX86State *env)
 {
     int pg_mode = 0;
@@ -62,6 +64,167 @@ typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType acc
 #define GET_HPHYS(cs, gpa, access_type, prot)  \
 	(get_hphys_func ? get_hphys_func(cs, gpa, access_type, prot) : gpa)
 
+#ifdef TARGET_X86_64_ECPT
+
+static uint64_t two_round_hash(uint64_t x) {
+    x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+    x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+    x = x ^ (x >> 31);
+    return x;
+}
+
+static uint64_t gen_has(hwaddr addr, uint64_t size) {
+    uint64_t hash = two_round_hash(addr);
+    hash = hash % size;
+    if (hash > size) {
+        printf("Hash value %lu, size %lu\n", hash, size);
+        assert(1 == 0 && "Hash value is larger than index\n");
+    }
+
+    return hash;
+}
+
+static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
+                         hwaddr *xlat, int *page_size, int *prot)
+{
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+
+    int error_code = 0;
+    int is_dirty;
+    int is_write = is_write1 & 1;
+    int is_user = (mmu_idx == MMU_USER_IDX);
+    uint64_t rsvd_mask = PG_ADDRESS_MASK & ~MAKE_64BIT_MASK(0, cpu->phys_bits);
+    uint32_t page_offset;
+    uint32_t pkr;
+
+    /**
+     * TODO: 
+     *  unclear meaning of a20_mask
+     */
+    int32_t a20_mask = x86_get_a20_mask(env);
+
+    /* can be more thoughtful on how cr3 stores */
+    uint64_t size = cr3 & 0xfff;
+    uint64_t hash = gen_has(addr, size);
+
+    hwaddr pte_addr = (cr3 & ~0xfff)                /* page table base */
+                            + (hash << 3);           /*  offset; */
+    pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+    uint64_t pte = x86_ldq_phys(cs, pte_addr);
+
+    uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
+    ptep &= pte;
+
+    /*  */
+    if (!(pte & PG_PRESENT_MASK)) {
+        goto do_fault;
+    }
+
+/* TODO: fix legacy from paging's protection check */
+    /**
+     * don't need these two symbols here since, we go to the following code if we are arriving at the leaf of the page table
+     * 
+     */
+// do_check_protect:
+    rsvd_mask |= (*page_size - 1) & PG_ADDRESS_MASK & ~PG_PSE_PAT_MASK;
+// do_check_protect_pse36:
+    if (pte & rsvd_mask) {
+        goto do_fault_rsvd;
+    }
+    // ptep ^= PG_NX_MASK;
+
+    /* can the page can be put in the TLB?  prot will tell us */
+    if (is_user && !(ptep & PG_USER_MASK)) {
+        goto do_fault_protect;
+    }
+
+    *prot = 0;
+    if (mmu_idx != MMU_KSMAP_IDX || !(ptep & PG_USER_MASK)) {
+        *prot |= PAGE_READ;
+        if ((ptep & PG_RW_MASK) || !(is_user || (pg_mode & PG_MODE_WP))) {
+            *prot |= PAGE_WRITE;
+        }
+    }
+    if (!(ptep & PG_NX_MASK) &&
+        (mmu_idx == MMU_USER_IDX ||
+         !((pg_mode & PG_MODE_SMEP) && (ptep & PG_USER_MASK)))) {
+        *prot |= PAGE_EXEC;
+    }
+
+    if (!(env->hflags & HF_LMA_MASK)) {
+        pkr = 0;
+    } else if (ptep & PG_USER_MASK) {
+        pkr = pg_mode & PG_MODE_PKE ? env->pkru : 0;
+    } else {
+        pkr = pg_mode & PG_MODE_PKS ? env->pkrs : 0;
+    }
+    if (pkr) {
+        uint32_t pk = (pte & PG_PKRU_MASK) >> PG_PKRU_BIT;
+        uint32_t pkr_ad = (pkr >> pk * 2) & 1;
+        uint32_t pkr_wd = (pkr >> pk * 2) & 2;
+        uint32_t pkr_prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+
+        if (pkr_ad) {
+            pkr_prot &= ~(PAGE_READ | PAGE_WRITE);
+        } else if (pkr_wd && (is_user || (pg_mode & PG_MODE_WP))) {
+            pkr_prot &= ~PAGE_WRITE;
+        }
+
+        *prot &= pkr_prot;
+        if ((pkr_prot & (1 << is_write1)) == 0) {
+            assert(is_write1 != 2);
+            error_code |= PG_ERROR_PK_MASK;
+            goto do_fault_protect;
+        }
+    }
+
+    if ((*prot & (1 << is_write1)) == 0) {
+        goto do_fault_protect;
+    }
+
+    /* yes, it can! */
+    is_dirty = is_write && !(pte & PG_DIRTY_MASK);
+    if (!(pte & PG_ACCESSED_MASK) || is_dirty) {
+        pte |= PG_ACCESSED_MASK;
+        if (is_dirty) {
+            pte |= PG_DIRTY_MASK;
+        }
+        x86_stl_phys_notdirty(cs, pte_addr, pte);
+    }
+
+    if (!(pte & PG_DIRTY_MASK)) {
+        /* only set write access if already dirty... otherwise wait
+           for dirty access */
+        assert(!is_write);
+        *prot &= ~PAGE_WRITE;
+    }
+
+    pte = pte & a20_mask;
+
+    /* align to page_size */
+    pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
+    page_offset = addr & (*page_size - 1);
+    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
+    return PG_ERROR_OK;
+
+ do_fault_rsvd:
+    error_code |= PG_ERROR_RSVD_MASK;
+ do_fault_protect:
+    error_code |= PG_ERROR_P_MASK;
+ do_fault:
+    error_code |= (is_write << PG_ERROR_W_BIT);
+    if (is_user)
+        error_code |= PG_ERROR_U_MASK;
+    if (is_write1 == 2 &&
+        (((pg_mode & PG_MODE_NXE) && (pg_mode & PG_MODE_PAE)) ||
+         (pg_mode & PG_MODE_SMEP)))
+        error_code |= PG_ERROR_I_D_MASK;
+    return error_code;
+}
+
+#else 
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot)
@@ -214,7 +377,15 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             goto do_fault_rsvd;
         }
         /* combine pde and pte nx, user and rw protections */
+
+        /* pte[63] -> if page non executable */
+        /* ptep[63] -> if page executable */
+        /* A page is executable only if ALL of its parent page entries has NX bit as 0 */
+        /* the logic is reversed here to simplify the AND logic */
+
         ptep &= pte ^ PG_NX_MASK;
+        
+        
         *page_size = 4096;
     } else {
         uint32_t pde;
@@ -357,6 +528,7 @@ do_check_protect_pse36:
         error_code |= PG_ERROR_I_D_MASK;
     return error_code;
 }
+#endif
 
 hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
                         int *prot)

@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "osdep.h": "c",
+        "config-host.h": "c",
+        "*.inc": "c",
+        "system_error": "c",
+        "helper-tcg.h": "c",
+        "helper-proto.h": "c",
+        "poison.h": "c",
+        "compiler.h": "c",
+        "cpu.h": "c"
+    }
+}
