@@ -19,7 +19,11 @@
 
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "exec/log.h"
 #include "tcg/helper-tcg.h"
+
+#include "ECPT_hash.h"
+
 
 #define TARGET_X86_64_ECPT 1
 
@@ -66,15 +70,18 @@ typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType acc
 
 #ifdef TARGET_X86_64_ECPT
 
-static uint64_t two_round_hash(uint64_t x) {
-    x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-    x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
-    x = x ^ (x >> 31);
-    return x;
-}
+// static uint64_t two_round_hash64(uint64_t x) {
+//     x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+//     x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+//     x = x ^ (x >> 31);
+//     return x;
+// }
 
-static uint64_t gen_has(hwaddr addr, uint64_t size) {
-    uint64_t hash = two_round_hash(addr);
+
+
+
+static uint64_t gen_has(uint64_t vpn, uint64_t size) {
+    uint64_t hash = hash_wrapper(vpn);
     hash = hash % size;
     if (hash > size) {
         printf("Hash value %lu, size %lu\n", hash, size);
@@ -83,6 +90,38 @@ static uint64_t gen_has(hwaddr addr, uint64_t size) {
 
     return hash;
 }
+
+#define PAGE_HEADER_MASK (0xffff000000000000)
+#define PAGE_TAIL_MASK_4KB (0xfff)
+#define PAGE_TAIL_MASK_2MB (0x1fffff)
+#define PAGE_TAIL_MASK_1GB (0x3fffffff)
+
+
+#define PAGE_SHIFT_4KB (12)
+#define PAGE_SHIFT_2MB (21)
+#define PAGE_SHIFT_1GB (30)
+
+#define PAGE_SIZE_4KB (1UL << PAGE_SHIFT_4KB)
+#define PAGE_SIZE_2MB (1UL << PAGE_SHIFT_2MB)
+#define PAGE_SIZE_1GB (1UL << PAGE_SHIFT_1GB)
+
+#define ADDR_TO_PAGE_NUM_4KB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_4KB)
+#define ADDR_TO_PAGE_NUM_2MB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_2MB)
+#define ADDR_TO_PAGE_NUM_1GB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_1GB)
+
+#define ADDR_TO_OFFSET_4KB(x)   ((x) & PAGE_TAIL_MASK_4KB)
+#define ADDR_TO_OFFSET_2MB(x)   ((x) &     PAGE_TAIL_MASK_2MB)
+#define ADDR_TO_OFFSET_1GB(x)   ((x) &   PAGE_TAIL_MASK_1GB)
+
+#define PAGE_NUM_TO_ADDR_4KB(x)   (((hwaddr)x) << PAGE_SHIFT_4KB)
+#define PAGE_NUM_TO_ADDR_2MB(x)   (((hwaddr)x) << PAGE_SHIFT_2MB)
+#define PAGE_NUM_TO_ADDR_1GB(x)   (((hwaddr)x) << PAGE_SHIFT_1GB)
+
+#define HPT_SIZE_MASK (0xfff)      /* max hpt size = 16383*/
+#define HPT_SIZE_HIDDEN_BITS (4)    /* 16 * cr3[0:11] for number of entries */
+#define HPT_BASE_MASK (~(HPT_SIZE_MASK))
+#define GET_HPT_SIZE(cr3) ((((uint64_t) cr3) & HPT_SIZE_MASK ) << HPT_SIZE_HIDDEN_BITS)
+#define GET_HPT_BASE(cr3) (((uint64_t) cr3) & HPT_BASE_MASK )
 
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
@@ -99,24 +138,43 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     uint32_t page_offset;
     uint32_t pkr;
 
+    qemu_log_mask(CPU_LOG_MMU, "Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
+           addr, is_write1, mmu_idx, cr3);
+    // printf("Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%16lx\n",
+        //    addr, is_write1, mmu_idx, cr3);
+
     /**
      * TODO: 
      *  unclear meaning of a20_mask
      */
     int32_t a20_mask = x86_get_a20_mask(env);
 
-    /* can be more thoughtful on how cr3 stores */
-    uint64_t size = cr3 & 0xfff;
-    uint64_t hash = gen_has(addr, size);
+    /**
+     * @brief 
+     * cr3 structure for now:
+     *      51-12 bits base address for hash page table
+     *      11-0 bits #of entries the hash page table can contain
+     *      size of the page table obtained by 
+     * 
+     *  TODO:
+     *      translation only for 1GB right now
+     */
+    uint64_t size = GET_HPT_SIZE(cr3);
+    uint64_t hash = gen_has(ADDR_TO_PAGE_NUM_2MB(addr) , size);
 
-    hwaddr pte_addr = (cr3 & ~0xfff)                /* page table base */
+    qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx ppn =0x%lx size0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
+    
+    hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
     pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
     uint64_t pte = x86_ldq_phys(cs, pte_addr);
 
+
+    qemu_log_mask(CPU_LOG_MMU, "    Translate: pte=0x%16lx\n", pte);
+
     uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
     ptep &= pte;
-
+    *page_size = PAGE_SIZE_2MB;
     /*  */
     if (!(pte & PG_PRESENT_MASK)) {
         goto do_fault;
@@ -204,8 +262,9 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     pte = pte & a20_mask;
 
     /* align to page_size */
-    pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
-    page_offset = addr & (*page_size - 1);
+    // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
+    page_offset = ADDR_TO_OFFSET_2MB(addr);
+    pte = PAGE_NUM_TO_ADDR_2MB(ADDR_TO_PAGE_NUM_2MB(pte));
     *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
     return PG_ERROR_OK;
 
@@ -582,6 +641,10 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
     printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
            addr, is_write1, mmu_idx, env->eip);
 #endif
+    qemu_log_mask(CPU_LOG_MMU, "MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
+           addr, is_write1, mmu_idx, env->eip);
+    // printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
+        //    addr, is_write1, mmu_idx, env->eip);
 
     if (!(env->cr[0] & CR0_PG_MASK)) {
         paddr = addr;
@@ -598,6 +661,10 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         error_code = mmu_translate(cs, addr, get_hphys, env->cr[3], is_write1,
                                    mmu_idx, pg_mode,
                                    &paddr, &page_size, &prot);
+        qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x\n",
+           paddr, page_size, prot);
+        // printf("Translation Result: paddr=%" VADDR_PRIx " page_size=%d prot=0x%x\n",
+        //    paddr, page_size, prot);
     }
 
     if (error_code == PG_ERROR_OK) {

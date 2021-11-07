@@ -8,6 +8,17 @@
         "helper-proto.h": "c",
         "poison.h": "c",
         "compiler.h": "c",
-        "cpu.h": "c"
+        "cpu.h": "c",
+        "atomic": "c",
+        "cstdint": "c",
+        "random": "c",
+        "*.tcc": "c",
+        "setjmp.h": "c",
+        "*.idef": "cpp",
+        "log.h": "c",
+        "disas.h": "c",
+        "rcu.h": "c",
+        "type_traits": "cpp",
+        "functional": "cpp"
     }
 }
