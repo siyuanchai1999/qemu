@@ -23,7 +23,7 @@
 #include "tcg/helper-tcg.h"
 
 #include "ECPT_hash.h"
-
+#include "ECPT.h"
 
 #define TARGET_X86_64_ECPT 1
 
@@ -70,17 +70,8 @@ typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType acc
 
 #ifdef TARGET_X86_64_ECPT
 
-// static uint64_t two_round_hash64(uint64_t x) {
-//     x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-//     x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
-//     x = x ^ (x >> 31);
-//     return x;
-// }
 
-
-
-
-static uint64_t gen_has(uint64_t vpn, uint64_t size) {
+static uint64_t gen_hash(uint64_t vpn, uint64_t size) {
     uint64_t hash = hash_wrapper(vpn);
     hash = hash % size;
     if (hash > size) {
@@ -91,76 +82,59 @@ static uint64_t gen_has(uint64_t vpn, uint64_t size) {
     return hash;
 }
 
-// #define PAGE_HEADER_MASK (0xffff000000000000)
-// #define PAGE_TAIL_MASK_4KB (0xfff)
-// #define PAGE_TAIL_MASK_2MB (0x1fffff)
-// #define PAGE_TAIL_MASK_1GB (0x3fffffff)
+static uint64_t gen_hash64(uint64_t vpn, uint64_t size) {
+    uint64_t hash = crc64_hash(vpn);
+    hash = hash % size;
+    if (hash > size) {
+        printf("Hash value %lu, size %lu\n", hash, size);
+        assert(1 == 0 && "Hash value is larger than index\n");
+    }
+
+    return hash;
+}
+
+static void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
+	int32_t loaded = 0;
+	int32_t needed = size;
+	
+	void * ptr = (void *) entry;
+
+	while(loaded < needed) {
+		if (needed - loaded >= 8) {
+			uint64_t * quad_ptr = (uint64_t *) ptr;
+			*quad_ptr = x86_ldq_phys(cs, addr);
+
+			ptr += 8;
+			loaded += 8;
+			addr += 8;
+		} else if (needed - loaded >= 4) {
+			uint32_t * long_ptr = (uint32_t *) ptr;
+			*long_ptr = x86_ldl_phys(cs, addr);
+
+			ptr += 4;
+			loaded += 4;
+			addr += 4;
+		} else if (needed - loaded >= 2) {
+			uint16_t * word_ptr = (uint16_t *) ptr;
+			*word_ptr = x86_lduw_phys(cs, addr);
+
+			ptr += 2;
+			loaded += 2;
+			addr += 2;
+		} else {
+			uint8_t * word_ptr = (uint8_t *) ptr;
+			*word_ptr = x86_ldub_phys(cs, addr);
+
+			ptr += 1;
+			loaded += 1;
+			addr += 1;
+		}
+	}
+}
 
 
-// #define PAGE_SHIFT_4KB (12)
-// #define PAGE_SHIFT_2MB (21)
-// #define PAGE_SHIFT_1GB (30)
 
-// #define PAGE_SIZE_4KB (1UL << PAGE_SHIFT_4KB)
-// #define PAGE_SIZE_2MB (1UL << PAGE_SHIFT_2MB)
-// #define PAGE_SIZE_1GB (1UL << PAGE_SHIFT_1GB)
-
-// #define ADDR_TO_PAGE_NUM_4KB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_4KB)
-// #define ADDR_TO_PAGE_NUM_2MB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_2MB)
-// #define ADDR_TO_PAGE_NUM_1GB(x)   (((x) & ~ PAGE_HEADER_MASK) >> PAGE_SHIFT_1GB)
-
-// #define ADDR_TO_OFFSET_4KB(x)   ((x) & PAGE_TAIL_MASK_4KB)
-// #define ADDR_TO_OFFSET_2MB(x)   ((x) &     PAGE_TAIL_MASK_2MB)
-// #define ADDR_TO_OFFSET_1GB(x)   ((x) &   PAGE_TAIL_MASK_1GB)
-
-// #define PAGE_NUM_TO_ADDR_4KB(x)   (((hwaddr)x) << PAGE_SHIFT_4KB)
-// #define PAGE_NUM_TO_ADDR_2MB(x)   (((hwaddr)x) << PAGE_SHIFT_2MB)
-// #define PAGE_NUM_TO_ADDR_1GB(x)   (((hwaddr)x) << PAGE_SHIFT_1GB)
-
-#define PAGE_HEADER_MASK (0xffff000000000000)
-#define PAGE_TAIL_MASK_4KB (0xfff)
-#define PAGE_TAIL_MASK_2MB (0x1fffff)
-#define PAGE_TAIL_MASK_1GB (0x3fffffff)
-#define PAGE_TAIL_MASK_512GB (0x7fffffffff)
-
-#define PAGE_SHIFT_4KB (12)
-#define PAGE_SHIFT_2MB (21)
-#define PAGE_SHIFT_1GB (30)
-#define PAGE_SHIFT_512GB (39)
-
-
-#define PAGE_SIZE_4KB (1UL << PAGE_SHIFT_4KB)
-#define PAGE_SIZE_2MB (1UL << PAGE_SHIFT_2MB)
-#define PAGE_SIZE_1GB (1UL << PAGE_SHIFT_1GB)
-#define PAGE_SIZE_512GB (1UL << PAGE_SHIFT_512GB)
-
-#define ADDR_REMOVE_OFFSET_4KB(x)   ((x) & ~PAGE_TAIL_MASK_4KB)
-#define ADDR_REMOVE_OFFSET_2MB(x)   ((x) & ~PAGE_TAIL_MASK_2MB)
-#define ADDR_REMOVE_OFFSET_1GB(x)   ((x) & ~PAGE_TAIL_MASK_1GB)
-
-#define ADDR_TO_OFFSET_4KB(x)   ((x) & PAGE_TAIL_MASK_4KB)
-#define ADDR_TO_OFFSET_2MB(x)   ((x) & PAGE_TAIL_MASK_2MB)
-#define ADDR_TO_OFFSET_1GB(x)   ((x) & PAGE_TAIL_MASK_1GB)
-
-#define ADDR_TO_PAGE_NUM_4KB(x)   ((ADDR_REMOVE_OFFSET_4KB(x)) >> PAGE_SHIFT_4KB)
-#define ADDR_TO_PAGE_NUM_2MB(x)   ((ADDR_REMOVE_OFFSET_2MB(x)) >> PAGE_SHIFT_2MB)
-#define ADDR_TO_PAGE_NUM_1GB(x)   ((ADDR_REMOVE_OFFSET_1GB(x)) >> PAGE_SHIFT_1GB)
-
-
-#define PAGE_NUM_TO_ADDR_4KB(x)   (((uint64_t) x) << PAGE_SHIFT_4KB)
-#define PAGE_NUM_TO_ADDR_2MB(x)   (((uint64_t) x) << PAGE_SHIFT_2MB)
-#define PAGE_NUM_TO_ADDR_1GB(x)   (((uint64_t) x) << PAGE_SHIFT_1GB)
-
-
-#define HPT_SIZE_MASK (0xfff)      	/* 16 * cr3[0:11] for number of entries */
-#define HPT_SIZE_HIDDEN_BITS (4)    
-// #define HPT_CR3_TO_NUM_ENTRIES(cr3) ((((uint64_t) cr3 ) & HPT_SIZE_MASK) << HPT_SIZE_HIDDEN_BITS)
-#define HPT_NUM_ENTRIES_TO_CR3(size) (((uint64_t) cr3 ) >> HPT_SIZE_HIDDEN_BITS)
-#define HPT_BASE_MASK (~(HPT_SIZE_MASK))
-#define GET_HPT_SIZE(cr3) ((((uint64_t) cr3) & HPT_SIZE_MASK ) << HPT_SIZE_HIDDEN_BITS)
-#define GET_HPT_BASE(cr3) (((uint64_t) cr3) & HPT_BASE_MASK )
-
-static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot)
 {
@@ -175,7 +149,220 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     uint32_t page_offset;
     uint32_t pkr;
 
-    qemu_log_mask(CPU_LOG_MMU, "Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
+    /**
+     * TODO: support more granularity
+     */
+    enum Granularity gran = page_2MB;
+
+    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
+           addr, is_write1, mmu_idx, cr3);
+
+    /**
+     * TODO: 
+     *  unclear meaning of a20_mask
+     */
+    int32_t a20_mask = x86_get_a20_mask(env);
+
+    /**
+     * @brief 
+     * cr3 structure for now:
+     *      51-12 bits base address for hash page table
+     *      11-0 bits #of entries the hash page table can contain
+     *      size of the page table obtained by 
+     * 
+     */
+    int w;
+    uint64_t vpn, size, hash, cr, pte = 0;
+    hwaddr entry_addr;
+	ecpt_entry_2M * ecpt_base;
+	ecpt_entry_2M entry;
+
+    if (gran == page_4KB) {
+        vpn = ADDR_TO_PAGE_NUM_4KB(addr);
+    } else if (gran == page_2MB) {
+        vpn = ADDR_TO_PAGE_NUM_2MB(addr);
+    } else {
+        /* gran == page_1GB */
+        vpn = ADDR_TO_PAGE_NUM_1GB(addr);
+    }
+
+
+	for (w = 0; w < ECPT_2M_WAY; w++) {
+		cr = env->cr[way_to_crN[w]];
+
+		size = GET_HPT_SIZE(cr3);
+		hash = gen_hash64(vpn, size);
+		qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%lx size=0x%lx\n", hash, vpn, size);
+
+		ecpt_base = (ecpt_entry_2M * ) GET_HPT_BASE(cr);
+		entry_addr = (uint64_t) &ecpt_base[hash];
+		qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+
+		/* do nothing for now, cuz nested paging is not enabled */
+		entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
+
+		load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_2M));
+		
+		if (entry.VPN_tag == vpn) {
+			/* found */
+			pte = entry.pmd;
+		} else {
+			/* not found move on */
+		}
+	}
+
+
+    qemu_log_mask(CPU_LOG_MMU, "    Translate: pte=0x%016lx way=%d\n", pte, w);
+
+    uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
+    ptep &= pte;
+
+    if (gran == page_4KB) {
+        *page_size = PAGE_SIZE_4KB;
+    } else if (gran == page_2MB) {
+        *page_size = PAGE_SIZE_2MB;
+    } else {
+        /* gran == page_1GB */
+        *page_size = PAGE_SIZE_1GB;
+    }
+
+    
+    /*  */
+    if (!(pte & PG_PRESENT_MASK)) {
+		qemu_log_mask(CPU_LOG_MMU, "    fault triggered. Page not Present!\n");
+        goto do_fault;
+    }
+
+    /**
+     * don't need these two symbols here since, we go to the following code if we are arriving at the leaf of the page table
+     * 
+     */
+// do_check_protect:
+    rsvd_mask |= (*page_size - 1) & PG_ADDRESS_MASK & ~PG_PSE_PAT_MASK;
+// do_check_protect_pse36:
+    if (pte & rsvd_mask) {
+        goto do_fault_rsvd;
+    }
+    // ptep ^= PG_NX_MASK;
+
+    /* can the page can be put in the TLB?  prot will tell us */
+    if (is_user && !(ptep & PG_USER_MASK)) {
+        goto do_fault_protect;
+    }
+
+    *prot = 0;
+    if (mmu_idx != MMU_KSMAP_IDX || !(ptep & PG_USER_MASK)) {
+        *prot |= PAGE_READ;
+        if ((ptep & PG_RW_MASK) || !(is_user || (pg_mode & PG_MODE_WP))) {
+            *prot |= PAGE_WRITE;
+        }
+    }
+    if (!(ptep & PG_NX_MASK) &&
+        (mmu_idx == MMU_USER_IDX ||
+         !((pg_mode & PG_MODE_SMEP) && (ptep & PG_USER_MASK)))) {
+        *prot |= PAGE_EXEC;
+    }
+
+    if (!(env->hflags & HF_LMA_MASK)) {
+        pkr = 0;
+    } else if (ptep & PG_USER_MASK) {
+        pkr = pg_mode & PG_MODE_PKE ? env->pkru : 0;
+    } else {
+        pkr = pg_mode & PG_MODE_PKS ? env->pkrs : 0;
+    }
+    if (pkr) {
+        uint32_t pk = (pte & PG_PKRU_MASK) >> PG_PKRU_BIT;
+        uint32_t pkr_ad = (pkr >> pk * 2) & 1;
+        uint32_t pkr_wd = (pkr >> pk * 2) & 2;
+        uint32_t pkr_prot = PAGE_READ | PAGE_WRITE | PAGE_EXEC;
+
+        if (pkr_ad) {
+            pkr_prot &= ~(PAGE_READ | PAGE_WRITE);
+        } else if (pkr_wd && (is_user || (pg_mode & PG_MODE_WP))) {
+            pkr_prot &= ~PAGE_WRITE;
+        }
+
+        *prot &= pkr_prot;
+        if ((pkr_prot & (1 << is_write1)) == 0) {
+            assert(is_write1 != 2);
+            error_code |= PG_ERROR_PK_MASK;
+            goto do_fault_protect;
+        }
+    }
+
+    if ((*prot & (1 << is_write1)) == 0) {
+        goto do_fault_protect;
+    }
+
+    /* yes, it can! */
+    is_dirty = is_write && !(pte & PG_DIRTY_MASK);
+    if (!(pte & PG_ACCESSED_MASK) || is_dirty) {
+        pte |= PG_ACCESSED_MASK;
+        if (is_dirty) {
+            pte |= PG_DIRTY_MASK;
+        }
+        x86_stl_phys_notdirty(cs, entry_addr, pte);
+    }
+
+    if (!(pte & PG_DIRTY_MASK)) {
+        /* only set write access if already dirty... otherwise wait
+           for dirty access */
+        assert(!is_write);
+        *prot &= ~PAGE_WRITE;
+    }
+
+    pte = pte & a20_mask;
+
+    /* align to page_size */
+    // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
+    if (gran == page_4KB) {
+        page_offset = ADDR_TO_OFFSET_4KB(addr);
+        pte = PAGE_NUM_TO_ADDR_4KB(ADDR_TO_PAGE_NUM_4KB(pte));
+    } else if (gran == page_2MB) {
+        page_offset = ADDR_TO_OFFSET_2MB(addr);
+        pte = PAGE_NUM_TO_ADDR_2MB(ADDR_TO_PAGE_NUM_2MB(pte));
+    } else {
+        /* gran == page_1GB */
+        page_offset = ADDR_TO_OFFSET_1GB(addr);
+        pte = PAGE_NUM_TO_ADDR_1GB(ADDR_TO_PAGE_NUM_1GB(pte));
+    }
+    
+    pte = pte & PG_ADDRESS_MASK;
+    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
+    return PG_ERROR_OK;
+
+ do_fault_rsvd:
+    error_code |= PG_ERROR_RSVD_MASK;
+ do_fault_protect:
+    error_code |= PG_ERROR_P_MASK;
+ do_fault:
+    error_code |= (is_write << PG_ERROR_W_BIT);
+    if (is_user)
+        error_code |= PG_ERROR_U_MASK;
+    if (is_write1 == 2 &&
+        (((pg_mode & PG_MODE_NXE) && (pg_mode & PG_MODE_PAE)) ||
+         (pg_mode & PG_MODE_SMEP)))
+        error_code |= PG_ERROR_I_D_MASK;
+    return error_code;
+}
+
+
+static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
+                         hwaddr *xlat, int *page_size, int *prot)
+{
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+
+    int error_code = 0;
+    int is_dirty;
+    int is_write = is_write1 & 1;
+    int is_user = (mmu_idx == MMU_USER_IDX);
+    uint64_t rsvd_mask = PG_ADDRESS_MASK & ~MAKE_64BIT_MASK(0, cpu->phys_bits);
+    uint32_t page_offset;
+    uint32_t pkr;
+
+    qemu_log_mask(CPU_LOG_MMU, "2M_basic Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
            addr, is_write1, mmu_idx, cr3);
     // printf("Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%16lx\n",
         //    addr, is_write1, mmu_idx, cr3);
@@ -197,9 +384,9 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
      *      translation only for 2MB right now
      */
     uint64_t size = GET_HPT_SIZE(cr3);
-    uint64_t hash = gen_has(ADDR_TO_PAGE_NUM_2MB(addr) , size);
+    uint64_t hash = gen_hash(ADDR_TO_PAGE_NUM_2MB(addr) , size);
 
-    qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%lx size=0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
+    qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%llx size=0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
     
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
@@ -321,6 +508,20 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
          (pg_mode & PG_MODE_SMEP)))
         error_code |= PG_ERROR_I_D_MASK;
     return error_code;
+}
+
+static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
+                         hwaddr *xlat, int *page_size, int *prot) {
+                            
+    int after_transition = !!(cr3 & CR3_TRANSITION_BIT);
+
+    if (after_transition) {
+        return mmu_translate_ECPT(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
+
+    } else {
+        return mmu_translate_2M_basic(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
+    }
 }
 
 #else 
@@ -637,6 +838,11 @@ hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
     int page_size;
     int next_prot;
     hwaddr hphys;
+
+	// qemu_log_mask(CPU_LOG_MMU, "\tNested Paging turned on=%d\n",
+    //        (env->hflags2 & HF2_NPT_MASK));
+	/* nested paging not turned on for now */
+
 
     if (likely(!(env->hflags2 & HF2_NPT_MASK))) {
         return gphys;

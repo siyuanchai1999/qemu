@@ -8109,6 +8109,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
          */
         rm = (modrm & 7) | REX_B(s);
         reg = ((modrm >> 3) & 7) | REX_R(s);
+        qemu_log_mask(CPU_LOG_MMU, "reg=%d\n", reg);
         switch (reg) {
         case 0:
             if ((prefixes & PREFIX_LOCK) &&
@@ -8119,6 +8120,13 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 2:
         case 3:
         case 4:
+
+        /* add more control register for ECPT */
+		case 1:
+        case 5:
+        case 6:
+        case 7:
+
         case 8:
             break;
         default:

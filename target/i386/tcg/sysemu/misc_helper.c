@@ -25,6 +25,9 @@
 #include "exec/address-spaces.h"
 #include "tcg/helper-tcg.h"
 
+#include "qemu/log.h"
+#include "ECPT.h"
+
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
     address_space_stb(&address_space_io, port, data,
@@ -82,6 +85,9 @@ target_ulong helper_read_crN(CPUX86State *env, int reg)
 
 void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
 {
+	qemu_log_mask(CPU_LOG_MMU,
+                        "reg=%d t0=%lx\n", reg, t0);
+	uint64_t cr3_invalid_mask;
     switch (reg) {
     case 0:
         /*
@@ -96,8 +102,13 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         cpu_x86_update_cr0(env, t0);
         break;
     case 3:
+		
+		cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~CR3_TRANSITION_BIT);
+		qemu_log_mask(CPU_LOG_MMU,
+                        "phys_bits=%d mask=%lx\n", env_archcpu(env)->phys_bits, cr3_invalid_mask);
+
         if ((env->efer & MSR_EFER_LMA) &&
-                (t0 & ((~0ULL) << env_archcpu(env)->phys_bits))) {
+                (t0 & cr3_invalid_mask)) {
             cpu_vmexit(env, SVM_EXIT_ERR, 0, GETPC());
         }
         if (!(env->efer & MSR_EFER_LMA)) {
