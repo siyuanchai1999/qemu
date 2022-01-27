@@ -254,21 +254,7 @@ typedef enum X86Seg {
 #define CR4_SMAP_MASK   (1U << 21)
 #define CR4_PKE_MASK   (1U << 22)
 #define CR4_PKS_MASK   (1U << 24)
-
-#ifdef TARGET_X86_64_ECPT
-    
-    #define CR4_ECPT_MASK   (1U << 25)
-
-    #define CR4_RESERVED_MASK \
-    (~(target_ulong)(CR4_VME_MASK | CR4_PVI_MASK | CR4_TSD_MASK \
-                | CR4_DE_MASK | CR4_PSE_MASK | CR4_PAE_MASK \
-                | CR4_MCE_MASK | CR4_PGE_MASK | CR4_PCE_MASK \
-                | CR4_OSFXSR_MASK | CR4_OSXMMEXCPT_MASK |CR4_UMIP_MASK \
-                | CR4_LA57_MASK \
-                | CR4_FSGSBASE_MASK | CR4_PCIDE_MASK | CR4_OSXSAVE_MASK \
-                | CR4_SMEP_MASK | CR4_SMAP_MASK | CR4_PKE_MASK | CR4_PKS_MASK))
-
-#else 
+ 
     #define CR4_RESERVED_MASK \
     (~(target_ulong)(CR4_VME_MASK | CR4_PVI_MASK | CR4_TSD_MASK \
                     | CR4_DE_MASK | CR4_PSE_MASK | CR4_PAE_MASK \
@@ -278,7 +264,7 @@ typedef enum X86Seg {
                     | CR4_FSGSBASE_MASK | CR4_PCIDE_MASK | CR4_OSXSAVE_MASK \
                     | CR4_SMEP_MASK | CR4_SMAP_MASK | CR4_PKE_MASK | CR4_PKS_MASK))
 
-#endif
+
 
 
 

@@ -191,7 +191,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 		hash = gen_hash64(vpn, size);
 		qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%lx size=0x%lx\n", hash, vpn, size);
 
-        rehash_ptr = GET_HPT_REHASH_PTR(cr);
+        rehash_ptr = 0;
 
         if (hash < rehash_ptr) {
             /* not supported for resizing now */
@@ -521,10 +521,11 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot) {
 
-    X86CPU *cpu = X86_CPU(cs);
-    CPUX86State *env = &cpu->env;
+    // X86CPU *cpu = X86_CPU(cs);
+    // CPUX86State *env = &cpu->env;
 
-    int after_transition = !!(env->cr[4] & CR4_ECPT_MASK);
+    // int after_transition = !!(env->cr[4] & CR4_ECPT_MASK);
+    int after_transition = !!(cr3 & CR3_TRANSITION_BIT);
 
     if (after_transition) {
         return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
