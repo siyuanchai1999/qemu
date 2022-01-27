@@ -72,13 +72,14 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define HPT_SIZE_HIDDEN_BITS (4)    
 // #define HPT_CR3_TO_NUM_ENTRIES(cr3) ((((uint64_t) cr3 ) & HPT_SIZE_MASK) << HPT_SIZE_HIDDEN_BITS)
 #define HPT_NUM_ENTRIES_TO_CR3(size) (((uint64_t) cr3 ) >> HPT_SIZE_HIDDEN_BITS)
+#define HPT_REHASH_PTR_MASK (0xfff0000000000000UL)
 #define HPT_BASE_MASK (0x000ffffffffff000UL)
 #define GET_HPT_SIZE(cr3) ((((uint64_t) cr3) & HPT_SIZE_MASK ) << HPT_SIZE_HIDDEN_BITS)
 #define GET_HPT_BASE(cr3) (((uint64_t) cr3) & HPT_BASE_MASK )
+#define GET_HPT_REHASH_PTR(cr3) ((((uint64_t) cr3) & HPT_REHASH_PTR_MASK ) >> (52 - HPT_SIZE_HIDDEN_BITS))
 
-
-#define CR3_TRANSITION_SHIFT (52)
-#define CR3_TRANSITION_BIT (1ULL << CR3_TRANSITION_SHIFT)
+// #define CR3_TRANSITION_SHIFT (52)
+// #define CR3_TRANSITION_BIT (1ULL << CR3_TRANSITION_SHIFT)
 
 
 #define ECPT_4K_WAY 0
@@ -88,10 +89,10 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 /* way 0 pointed by cr3, way 1 pointed by cr1 */
 extern uint32_t way_to_crN[ECPT_2M_WAY];
 
-typedef struct ecpt_entry_2M_{
+typedef struct ecpt_entry{
     uint64_t VPN_tag;
-    uint64_t pmd;
-} ecpt_entry_2M;
+    uint64_t pte;
+} ecpt_entry_t;
 
 
 #endif /* ECPT_H */

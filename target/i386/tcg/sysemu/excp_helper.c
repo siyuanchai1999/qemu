@@ -25,8 +25,6 @@
 #include "ECPT_hash.h"
 #include "ECPT.h"
 
-#define TARGET_X86_64_ECPT 1
-
 int get_pg_mode(CPUX86State *env)
 {
     int pg_mode = 0;
@@ -133,9 +131,8 @@ static void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
 }
 
 
-
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
-                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
+                         int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot)
 {
     X86CPU *cpu = X86_CPU(cs);
@@ -154,8 +151,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      */
     enum Granularity gran = page_2MB;
 
-    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
-           addr, is_write1, mmu_idx, cr3);
+    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
+           addr, is_write1, mmu_idx);
 
     /**
      * TODO: 
@@ -172,10 +169,10 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      * 
      */
     int w;
-    uint64_t vpn, size, hash, cr, pte = 0;
-    hwaddr entry_addr;
-	ecpt_entry_2M * ecpt_base;
-	ecpt_entry_2M entry;
+    uint64_t vpn, size, hash, cr, pte = 0, rehash_ptr;
+    hwaddr entry_addr = 0;
+	ecpt_entry_t * ecpt_base;
+	ecpt_entry_t entry;
 
     if (gran == page_4KB) {
         vpn = ADDR_TO_PAGE_NUM_4KB(addr);
@@ -190,25 +187,35 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 	for (w = 0; w < ECPT_2M_WAY; w++) {
 		cr = env->cr[way_to_crN[w]];
 
-		size = GET_HPT_SIZE(cr3);
+		size = GET_HPT_SIZE(cr);
 		hash = gen_hash64(vpn, size);
 		qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%lx size=0x%lx\n", hash, vpn, size);
 
-		ecpt_base = (ecpt_entry_2M * ) GET_HPT_BASE(cr);
-		entry_addr = (uint64_t) &ecpt_base[hash];
-		qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+        rehash_ptr = GET_HPT_REHASH_PTR(cr);
 
-		/* do nothing for now, cuz nested paging is not enabled */
-		entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
+        if (hash < rehash_ptr) {
+            /* not supported for resizing now */
+            /* rehash_ptr MBZ right now */
+            assert(0);
+        } else {
+            /* stay with current hash table */
 
-		load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_2M));
-		
-		if (entry.VPN_tag == vpn) {
-			/* found */
-			pte = entry.pmd;
-		} else {
-			/* not found move on */
-		}
+            ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(cr);
+            entry_addr = (uint64_t) &ecpt_base[hash];
+            qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+
+            /* do nothing for now, cuz nested paging is not enabled */
+            entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
+
+            load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
+            
+            if (entry.VPN_tag == vpn) {
+                /* found */
+                pte = entry.pte;
+            } else {
+                /* not found move on */
+            }
+        }
 	}
 
 
@@ -513,11 +520,14 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot) {
-                            
-    int after_transition = !!(cr3 & CR3_TRANSITION_BIT);
+
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+
+    int after_transition = !!(env->cr[4] & CR4_ECPT_MASK);
 
     if (after_transition) {
-        return mmu_translate_ECPT(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
+        return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
 
     } else {
         return mmu_translate_2M_basic(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);

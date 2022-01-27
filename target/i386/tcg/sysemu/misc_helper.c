@@ -103,7 +103,7 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         break;
     case 3:
 		
-		cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~CR3_TRANSITION_BIT);
+		cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~HPT_REHASH_PTR_MASK);
 		qemu_log_mask(CPU_LOG_MMU,
                         "phys_bits=%d mask=%lx\n", env_archcpu(env)->phys_bits, cr3_invalid_mask);
 

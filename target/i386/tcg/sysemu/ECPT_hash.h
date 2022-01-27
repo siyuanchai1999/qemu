@@ -3,7 +3,7 @@
 
 #include "qemu/osdep.h"
 #include "exec/log.h"
-
+#include "ECPT.h"
 
 uint32_t hash_wrapper(uint32_t addr);
 
