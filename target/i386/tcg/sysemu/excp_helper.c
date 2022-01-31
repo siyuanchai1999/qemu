@@ -149,7 +149,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     /**
      * TODO: support more granularity
      */
-    enum Granularity gran = page_2MB;
+    enum Granularity gran = page_4KB;
 
     qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
            addr, is_write1, mmu_idx);
@@ -174,22 +174,31 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 	ecpt_entry_t * ecpt_base;
 	ecpt_entry_t entry;
 
-    if (gran == page_4KB) {
-        vpn = ADDR_TO_PAGE_NUM_4KB(addr);
-    } else if (gran == page_2MB) {
-        vpn = ADDR_TO_PAGE_NUM_2MB(addr);
-    } else {
-        /* gran == page_1GB */
-        vpn = ADDR_TO_PAGE_NUM_1GB(addr);
-    }
 
+	for (w = 0; w < ECPT_TOTAL_WAY; w++) {
+		
+		/* go through all the ways to search for matching tag  */
+		/* In real hardware, this should be done in parallel */
+		if (w < ECPT_4K_WAY) {
+			// way = w;
+			gran = page_4KB;
+			vpn = ADDR_TO_PAGE_NUM_4KB(addr);
+		} else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
+			// way = w - ECPT_4K_WAY;
+			gran = page_2MB;
+			vpn = ADDR_TO_PAGE_NUM_2MB(addr);
+		} else {
+			/* 1GB */
+			// way = w - (ECPT_4K_WAY + ECPT_2M_WAY);
+			gran = page_1GB;
+			vpn = ADDR_TO_PAGE_NUM_1GB(addr);
+		}
 
-	for (w = 0; w < ECPT_2M_WAY; w++) {
 		cr = env->cr[way_to_crN[w]];
 
 		size = GET_HPT_SIZE(cr);
 		hash = gen_hash64(vpn, size);
-		qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%lx size=0x%lx\n", hash, vpn, size);
+		qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
 
         rehash_ptr = 0;
 
@@ -212,6 +221,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
             if (entry.VPN_tag == vpn) {
                 /* found */
                 pte = entry.pte;
+				break;
             } else {
                 /* not found move on */
             }

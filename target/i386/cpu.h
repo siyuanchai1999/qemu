@@ -1455,8 +1455,12 @@ typedef struct CPUX86State {
     SegmentCache gdt; /* only base and limit are used */
     SegmentCache idt; /* only base and limit are used */
 
+#ifdef TARGET_X86_64_ECPT
+	target_ulong cr[10]; /* NOTE: cr1 is unused */
+#else 
     target_ulong cr[5]; /* NOTE: cr1 is unused */
-    int32_t a20_mask;
+#endif
+	int32_t a20_mask;
 
     BNDReg bnd_regs[4];
     BNDCSReg bndcs_regs;

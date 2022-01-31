@@ -82,12 +82,38 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define CR3_TRANSITION_BIT (1ULL << CR3_TRANSITION_SHIFT)
 
 
-#define ECPT_4K_WAY 0
+#define ECPT_4K_WAY 2
 #define ECPT_2M_WAY 2
 #define ECPT_1G_WAY 0
 
-/* way 0 pointed by cr3, way 1 pointed by cr1 */
-extern uint32_t way_to_crN[ECPT_2M_WAY];
+#define ECPT_TOTAL_WAY (ECPT_4K_WAY  + ECPT_2M_WAY + ECPT_1G_WAY)
+
+/* ECPT_TOTAL_WAY <= ECPT_MAX_WAY*/
+#define ECPT_MAX_WAY 8
+
+/**
+ *  
+ *	for i = [0, ECPT_4K_WAY), cr_N where N = way_to_crN[i] correspond to way i of 4K ECPT  
+ *  for i = [ECPT_4K_WAY, ECPT_4K_WAY + ECPT_2M_WAY),
+ * 		cr_N where N = way_to_crN[i] correspond to way i - ECPT_4K_WAY of 2M ECPT
+ * 	for i = [ECPT_4K_WAY + ECPT_2M_WAY, ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY),
+ * 		cr_N where N = way_to_crN[i] correspond to way i - ECPT_4K_WAY + ECPT_2M_WAY of 2M ECPT
+ */
+
+/**
+ * @brief 
+ * 	
+ * 
+ * 	way_to_crN
+ * 	4K  4K  2M	2M  2M  2M	1G
+ * 	|	|	|	|	| 	|	|
+ * 	x	x 	x 	x	x	x	x	
+ * 	ECPT_4K_WAY = 2
+ * 	ECPT_2M_WAY = 4
+ * 	ECPT_1G_WAY = 1
+ */
+
+extern uint32_t way_to_crN[ECPT_MAX_WAY];
 
 typedef struct ecpt_entry{
     uint64_t VPN_tag;
