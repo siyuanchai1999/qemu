@@ -197,6 +197,15 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 		cr = env->cr[way_to_crN[w]];
 
 		size = GET_HPT_SIZE(cr);
+
+        if (!size) {
+            /**
+             *  this way is being constructed lazily,
+             *      so we don't bother checking this way 
+             */ 
+            continue;
+        }
+
 		hash = gen_hash64(vpn, size);
 		qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
 

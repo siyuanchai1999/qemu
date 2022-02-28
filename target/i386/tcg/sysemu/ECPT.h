@@ -89,7 +89,7 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define ECPT_TOTAL_WAY (ECPT_4K_WAY  + ECPT_2M_WAY + ECPT_1G_WAY)
 
 /* ECPT_TOTAL_WAY <= ECPT_MAX_WAY*/
-#define ECPT_MAX_WAY 8
+#define ECPT_MAX_WAY 9
 
 /**
  *  

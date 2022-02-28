@@ -8109,7 +8109,9 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
          */
         rm = (modrm & 7) | REX_B(s);
         reg = ((modrm >> 3) & 7) | REX_R(s);
-        qemu_log_mask(CPU_LOG_MMU, "reg=%d\n", reg);
+        // qemu_log_mask(CPU_LOG_MMU, "reg=%d\n", reg);
+		// qemu_log_mask(CPU_LOG_MMU, "pc=%lx pc_start=%lx cs_base=%lx\n", s->pc, s->pc_start, s->cs_base);
+
         switch (reg) {
         case 0:
             if ((prefixes & PREFIX_LOCK) &&
@@ -8126,6 +8128,10 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 5:
         case 6:
         case 7:
+        case 9:
+        case 10:
+        case 11:
+        case 12:
 
         case 8:
             break;
