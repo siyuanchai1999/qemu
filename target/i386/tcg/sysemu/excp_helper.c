@@ -177,22 +177,36 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
 	for (w = 0; w < ECPT_TOTAL_WAY; w++) {
 		
+
+
 		/* go through all the ways to search for matching tag  */
 		/* In real hardware, this should be done in parallel */
 		if (w < ECPT_4K_WAY) {
-			// way = w;
-			gran = page_4KB;
-			vpn = ADDR_TO_PAGE_NUM_4KB(addr);
-		} else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
-			// way = w - ECPT_4K_WAY;
-			gran = page_2MB;
+            gran = page_4KB;
+            vpn = ADDR_TO_PAGE_NUM_4KB(addr); 
+        } 
+        else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
+            gran = page_2MB;
 			vpn = ADDR_TO_PAGE_NUM_2MB(addr);
-		} else {
-			/* 1GB */
-			// way = w - (ECPT_4K_WAY + ECPT_2M_WAY);
-			gran = page_1GB;
+        } 
+        else if (w < ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY) {
+            gran = page_1GB;
 			vpn = ADDR_TO_PAGE_NUM_1GB(addr);
-		}
+        } 
+        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY) {
+            gran = page_4KB;
+            vpn = ADDR_TO_PAGE_NUM_4KB(addr);  
+        } 
+        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY) {
+            gran = page_2MB;
+			vpn = ADDR_TO_PAGE_NUM_2MB(addr);
+        } 
+        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY + ECPT_1G_USER_WAY) {
+            gran = page_1GB;
+			vpn = ADDR_TO_PAGE_NUM_1GB(addr);
+        } else {
+            assert(0);
+        }
 
 		cr = env->cr[way_to_crN[w]];
 
