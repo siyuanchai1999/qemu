@@ -1456,7 +1456,7 @@ typedef struct CPUX86State {
     SegmentCache idt; /* only base and limit are used */
 
 #ifdef TARGET_X86_64_ECPT
-	target_ulong cr[10]; /* NOTE: cr1 is unused */
+	target_ulong cr[12]; /* NOTE: cr1 is unused */
 #else 
     target_ulong cr[5]; /* NOTE: cr1 is unused */
 #endif
