@@ -22,6 +22,7 @@
 #include "exec/log.h"
 #include "tcg/helper-tcg.h"
 
+#include "excp_helper.h"
 #include "ECPT_hash.h"
 #include "ECPT.h"
 
@@ -974,4 +975,10 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
                                env->error_code, retaddr);
     }
     return true;
+}
+
+int mmu_translate_wrapper(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
+                         hwaddr *xlat, int *page_size, int *prot) {
+    return mmu_translate(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
 }
