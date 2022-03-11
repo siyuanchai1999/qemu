@@ -28,6 +28,8 @@
 #include "monitor/monitor.h"
 #endif
 
+#include "tcg/sysemu/excp_helper.h"
+
 void cpu_sync_bndcs_hflags(CPUX86State *env)
 {
     uint32_t hflags = env->hflags;
@@ -205,6 +207,63 @@ void cpu_x86_update_cr4(CPUX86State *env, uint32_t new_cr4)
 }
 
 #if !defined(CONFIG_USER_ONLY)
+#if defined(TARGET_X86_64_ECPT)
+hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
+                                         MemTxAttrs *attrs)
+{
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    // target_ulong pde_addr, pte_addr;  // unused
+    uint64_t pte;
+    int32_t a20_mask;
+    uint32_t page_offset;
+    int page_size;
+
+    *attrs = cpu_get_mem_attrs(env);
+
+    a20_mask = x86_get_a20_mask(env);
+
+    if (!(env->cr[0] & CR0_PG_MASK)) {
+        // basic HPT stage
+        // qemu_log_mask(CPU_LOG_MMU, "HPT stage, src addr: 0x%lx\n", addr);
+        pte = addr & a20_mask;
+        page_size = 4096;
+
+        // originally out of this if block
+        pte &= PG_ADDRESS_MASK & ~(page_size - 1);
+        page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
+        return pte | page_offset;
+    } else {
+        // ECPT stage
+        // qemu_log_mask(CPU_LOG_MMU, "ECPT stage, src addr: 0x%lx\n", addr);
+        
+        // initialize return variables
+        hwaddr xlat;
+        page_size = -1;
+        int prot;
+
+        mmu_translate_wrapper(
+            cs,
+            addr,
+            get_hphys,  // take care of the usage; should be ok
+            env->cr[3],
+            0,  // is_write1; fasle/read_only
+            attrs->user ? MMU_USER_IDX : MMU_KSMAP_IDX,  // mmu_idx
+            // MMU_KSMAP_IDX replaced MMU_KERNEL_IDX
+            // see https://lists.gnu.org/archive/html/qemu-devel/2014-06/msg01321.html
+            get_pg_mode(env),  // pg_mode
+
+            // pointers passed below as return values
+            &xlat,
+            &page_size,
+            &prot
+        );
+
+        // qemu_log_mask(CPU_LOG_MMU, "ECPT translated result: xlat 0x%lx pg_size %d prot %d\n", xlat, page_size, prot);
+        return xlat;
+    }
+}
+#else
 hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
                                          MemTxAttrs *attrs)
 {
@@ -326,8 +385,11 @@ out:
 #endif
     pte &= PG_ADDRESS_MASK & ~(page_size - 1);
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
+    qemu_log_mask(CPU_LOG_MMU, "eric pte %lu\n", pte);
+    qemu_log_mask(CPU_LOG_MMU, "eric page offset %u\n", page_offset);
     return pte | page_offset;
 }
+#endif
 
 typedef struct MCEInjectionParams {
     Monitor *mon;
