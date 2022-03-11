@@ -238,11 +238,12 @@ hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
         // qemu_log_mask(CPU_LOG_MMU, "ECPT stage, src addr: 0x%lx\n", addr);
         
         // initialize return variables
+        int error_code;
         hwaddr xlat;
         page_size = -1;
         int prot;
 
-        mmu_translate_wrapper(
+        error_code = mmu_translate_wrapper(
             cs,
             addr,
             get_hphys,  // take care of the usage; should be ok
@@ -259,8 +260,12 @@ hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
             &prot
         );
 
-        // qemu_log_mask(CPU_LOG_MMU, "ECPT translated result: xlat 0x%lx pg_size %d prot %d\n", xlat, page_size, prot);
-        return xlat;
+        if (error_code == PG_ERROR_OK) {
+            // qemu_log_mask(CPU_LOG_MMU, "ECPT translated result: xlat 0x%lx pg_size %d prot %d\n", xlat, page_size, prot);
+            return xlat;
+        } else {
+            return -1;
+        }
     }
 }
 #else
