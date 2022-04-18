@@ -130,6 +130,12 @@ static void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
 		}
 	}
 }
+#define GET_PTEP_OFFSET(addr) ( 0 )
+
+/* TODO: function needs to be changed if pte compaction is added */
+static inline hwaddr get_pte_addr(hwaddr entry_addr, hwaddr addr) {
+    return entry_addr + sizeof(((ecpt_entry_t *)0)->VPN_tag) + GET_PTEP_OFFSET(addr);
+}
 
 
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
@@ -342,7 +348,9 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         if (is_dirty) {
             pte |= PG_DIRTY_MASK;
         }
-        x86_stl_phys_notdirty(cs, entry_addr, pte);
+        hwaddr pte_addr = get_pte_addr(entry_addr, addr);
+        qemu_log_mask(CPU_LOG_MMU, "    update dirty at %lx pte=%lx!\n", pte_addr, pte );
+        x86_stl_phys_notdirty(cs, pte_addr, pte);
     }
 
     if (!(pte & PG_DIRTY_MASK)) {
@@ -563,7 +571,6 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 
     if (after_transition) {
         return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
-
     } else {
         return mmu_translate_2M_basic(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, xlat, page_size, prot);
     }
@@ -952,8 +959,8 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         error_code = mmu_translate(cs, addr, get_hphys, env->cr[3], is_write1,
                                    mmu_idx, pg_mode,
                                    &paddr, &page_size, &prot);
-        qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x\n",
-           paddr, page_size, prot);
+        qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x err=%x\n",
+           paddr, page_size, prot, error_code);
         // printf("Translation Result: paddr=%" VADDR_PRIx " page_size=%d prot=0x%x\n",
         //    paddr, page_size, prot);
     }
