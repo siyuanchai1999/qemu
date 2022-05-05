@@ -158,8 +158,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      */
     enum Granularity gran = page_4KB;
 
-    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
-           addr, is_write1, mmu_idx);
+    // qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
+        //    addr, is_write1, mmu_idx);
 
     /**
      * TODO: 
@@ -228,7 +228,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         }
 
 		hash = gen_hash64(vpn, size);
-		qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
+		// qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
 
         rehash_ptr = 0;
 
@@ -241,7 +241,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
             ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(cr);
             entry_addr = (uint64_t) &ecpt_base[hash];
-            qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+            // qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
 
             /* do nothing for now, cuz nested paging is not enabled */
             entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
@@ -258,8 +258,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         }
 	}
 
-
-    qemu_log_mask(CPU_LOG_MMU, "    Translate: pte=0x%016lx way=%d\n", pte, w);
+    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: load from 0x%016lx pte=0x%016lx way=%d\n", entry_addr, pte, w);
 
     uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
     ptep &= pte;
@@ -411,8 +410,8 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     uint32_t page_offset;
     uint32_t pkr;
 
-    qemu_log_mask(CPU_LOG_MMU, "2M_basic Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
-           addr, is_write1, mmu_idx, cr3);
+    // qemu_log_mask(CPU_LOG_MMU, "2M_basic Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
+        //    addr, is_write1, mmu_idx, cr3);
     // printf("Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%16lx\n",
         //    addr, is_write1, mmu_idx, cr3);
 
@@ -435,16 +434,16 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     uint64_t size = GET_HPT_SIZE(cr3);
     uint64_t hash = gen_hash(ADDR_TO_PAGE_NUM_2MB(addr) , size);
 
-    qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%llx size=0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
+    // qemu_log_mask(CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%llx size=0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
     
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
-	qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", pte_addr);
+	// qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", pte_addr);
     pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
     uint64_t pte = x86_ldq_phys(cs, pte_addr);
 
 
-    qemu_log_mask(CPU_LOG_MMU, "    Translate: pte=0x%016lx\n", pte);
+    qemu_log_mask(CPU_LOG_MMU, "2M_basic Translate: load from 0x%016lx pte=0x%016lx\n", pte_addr, pte);
 
     uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
     ptep &= pte;
