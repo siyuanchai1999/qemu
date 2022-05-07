@@ -8109,8 +8109,6 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
          */
         rm = (modrm & 7) | REX_B(s);
         reg = ((modrm >> 3) & 7) | REX_R(s);
-        // qemu_log_mask(CPU_LOG_MMU, "reg=%d\n", reg);
-		// qemu_log_mask(CPU_LOG_MMU, "pc=%lx pc_start=%lx cs_base=%lx\n", s->pc, s->pc_start, s->cs_base);
 
         switch (reg) {
         case 0:
@@ -8123,6 +8121,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 3:
         case 4:
 
+#ifdef TARGET_X86_64_ECPT
         /* add more control register for ECPT */
 		case 1:
         case 5:
@@ -8132,7 +8131,7 @@ static target_ulong disas_insn(DisasContext *s, CPUState *cpu)
         case 10:
         case 11:
         case 12:
-
+#endif
         case 8:
             break;
         default:
