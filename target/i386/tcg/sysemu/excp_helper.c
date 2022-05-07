@@ -81,9 +81,31 @@ static uint64_t gen_hash(uint64_t vpn, uint64_t size) {
     return hash;
 }
 
-static uint64_t gen_hash64(uint64_t vpn, uint64_t size) {
-    uint64_t hash = crc64_hash(vpn);
+static uint64_t crc_64_multi_hash(uint64_t vpn, uint64_t size, int n) {
+    uint64_t hash = 0, i = 0;
+    // hash = crc64_be(0, &vpn, 5);
+    // for (i = 0; i < n; i++) {
+    //     hash = crc64_be(hash, &vpn, 5);
+    // }
+
+    hash = crc64_be(0, &vpn, 5); /* at most we need five of them */ 
+    for (i = 0; i < n; i++) {
+        hash = crc64_be(0, &hash, 5);
+    }
+    return hash;
+}
+
+static uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) {
+    /**
+     *  crc_64_multi_hash applies hash for n times, where n is the way number
+     *  For example,
+     *  For way 0: hash = crc64_be(VA)
+     *  For way 1: hash = crc64_be(crc64_be(VA))
+     *  For way 2: hash = crc64_be(crc64_be(crc64_be(VA)))
+     */
+    uint64_t hash = crc_64_multi_hash(vpn, size, way);
     hash = hash % size;
+
     if (hash > size) {
         printf("Hash value %lu, size %lu\n", hash, size);
         assert(1 == 0 && "Hash value is larger than index\n");
@@ -158,8 +180,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      */
     enum Granularity gran = page_4KB;
 
-    // qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
-        //    addr, is_write1, mmu_idx);
+    qemu_log_mask(CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
+           addr, is_write1, mmu_idx);
 
     /**
      * TODO: 
@@ -227,8 +249,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
             continue;
         }
 
-		hash = gen_hash64(vpn, size);
-		// qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
+		hash = gen_hash64(vpn, size, w);
+		qemu_log_mask(CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
 
         rehash_ptr = 0;
 
@@ -241,7 +263,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
             ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(cr);
             entry_addr = (uint64_t) &ecpt_base[hash];
-            // qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+            qemu_log_mask(CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
 
             /* do nothing for now, cuz nested paging is not enabled */
             entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);

@@ -442,7 +442,7 @@ static uint64_t crc64_table[256] = {
 0x9afce626ce85b507UL
 };
 
-static uint64_t crc64_be(uint64_t crc, const void* p, uint64_t len) {
+uint64_t crc64_be(uint64_t crc, const void* p, uint64_t len) {
   uint64_t i, t;
 
   const unsigned char* _p = (const unsigned char*) (p);
@@ -454,8 +454,3 @@ static uint64_t crc64_be(uint64_t crc, const void* p, uint64_t len) {
   return (crc);
 }
 
-uint64_t crc64_hash(uint64_t vpn) {
-	// return crc32_be(0, (const unsigned char * ) &addr, 4); /* hash uint32 so length is 4 bytes */
-	return crc64_be(0xffffffff, (const unsigned char * ) &vpn, 5);
-    
-}
