@@ -10,3 +10,12 @@ i386_softmmu_ss.add(when: ['CONFIG_TCG', 'CONFIG_SOFTMMU'], if_true: files(
   'ECPT_hash.c',
   'ECPT.c',
 ))
+
+
+ecpt_gen = executable('ecpt_gen', 'ecpt_gen_crc64table.c')
+
+gen_table = custom_target('gen_crcr64table',
+                        output : ['ecpt_crc64table.h'],
+                        command : [ecpt_gen, '@OUTPUT@'])
+
+i386_softmmu_ss.add(gen_table)
