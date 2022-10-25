@@ -44,6 +44,8 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define PAGE_SHIFT_1GB (30)
 #define PAGE_SHIFT_512GB (39)
 
+#define ECPT_CLUSTER_NBITS 0
+#define ECPT_CLUSTER_FACTOR (1 << ECPT_CLUSTER_NBITS)
 
 #define PAGE_SIZE_4KB (1UL << PAGE_SHIFT_4KB)
 #define PAGE_SIZE_2MB (1UL << PAGE_SHIFT_2MB)
@@ -58,9 +60,9 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define ADDR_TO_OFFSET_2MB(x)   ((x) & PAGE_TAIL_MASK_2MB)
 #define ADDR_TO_OFFSET_1GB(x)   ((x) & PAGE_TAIL_MASK_1GB)
 
-#define ADDR_TO_PAGE_NUM_4KB(x)   ((ADDR_REMOVE_OFFSET_4KB(x)) >> PAGE_SHIFT_4KB)
-#define ADDR_TO_PAGE_NUM_2MB(x)   ((ADDR_REMOVE_OFFSET_2MB(x)) >> PAGE_SHIFT_2MB)
-#define ADDR_TO_PAGE_NUM_1GB(x)   ((ADDR_REMOVE_OFFSET_1GB(x)) >> PAGE_SHIFT_1GB)
+#define ADDR_TO_PAGE_NUM_4KB(x)   ((ADDR_REMOVE_OFFSET_4KB(x)) >> (PAGE_SHIFT_4KB + ECPT_CLUSTER_NBITS))
+#define ADDR_TO_PAGE_NUM_2MB(x)   ((ADDR_REMOVE_OFFSET_2MB(x)) >> (PAGE_SHIFT_2MB + ECPT_CLUSTER_NBITS))
+#define ADDR_TO_PAGE_NUM_1GB(x)   ((ADDR_REMOVE_OFFSET_1GB(x)) >> (PAGE_SHIFT_1GB + ECPT_CLUSTER_NBITS))
 
 
 #define PAGE_NUM_TO_ADDR_4KB(x)   (((uint64_t) x) << PAGE_SHIFT_4KB)
@@ -124,8 +126,46 @@ extern uint32_t way_to_crN[ECPT_MAX_WAY];
 
 typedef struct ecpt_entry{
     uint64_t VPN_tag;
-    uint64_t pte;
+    uint64_t pte[ECPT_CLUSTER_FACTOR];
 } ecpt_entry_t;
 
+static inline unsigned long ecpt_pte_index(uint64_t addr) 
+{
+	return (addr >> PAGE_SHIFT_4KB) & (ECPT_CLUSTER_FACTOR - 1);
+}
+
+static inline unsigned long ecpt_pmd_index(uint64_t addr) 
+{
+	return (addr >> PAGE_SHIFT_2MB) & (ECPT_CLUSTER_FACTOR - 1);
+}
+
+static inline unsigned long ecpt_pud_index(uint64_t addr)
+{
+	return (addr >> PAGE_SHIFT_1GB) & (ECPT_CLUSTER_FACTOR - 1);
+}
+
+static inline uint64_t * pte_offset_from_ecpt_entry(struct ecpt_entry *entry, uint64_t addr) 
+{
+	return (uint64_t *) &entry->pte[ecpt_pte_index(addr)];
+}
+
+static inline uint64_t * pmd_offset_from_ecpt_entry(struct ecpt_entry *entry, uint64_t addr) 
+{
+	return (uint64_t *) &entry->pte[ecpt_pmd_index(addr)];
+}
+
+static inline uint64_t * pud_offset_from_ecpt_entry(struct ecpt_entry *entry, uint64_t addr)
+{
+	return (uint64_t *) &entry->pte[ecpt_pud_index(addr)];
+}
+
+static inline uint64_t ecpt_entry_get_vpn(ecpt_entry_t * e) 
+{
+	return e->VPN_tag;
+}
+
+static inline int ecpt_entry_match_vpn(ecpt_entry_t *entry, uint64_t vpn) {
+	return ecpt_entry_get_vpn(entry) == vpn;
+}
 
 #endif /* ECPT_H */

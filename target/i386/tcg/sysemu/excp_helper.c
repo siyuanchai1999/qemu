@@ -162,12 +162,9 @@ static void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
 	}
 }
 
-#define GET_PTEP_OFFSET(addr) ( 0 )
-/* TODO: function needs to be changed if pte compaction is added */
-static inline hwaddr get_pte_addr(hwaddr entry_addr, hwaddr addr) {
-    return entry_addr + sizeof(((ecpt_entry_t *)0)->VPN_tag) + GET_PTEP_OFFSET(addr);
+static inline hwaddr get_pte_addr(hwaddr entry_addr, ecpt_entry_t * entry_p, uint64_t * pte_p) {
+    return entry_addr + (uint64_t) (((void *) pte_p) - ((void *) entry_p));
 }
-
 
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
@@ -208,7 +205,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      */
     int w;
     uint64_t vpn, size, hash, cr, pte = 0, rehash_ptr;
-    hwaddr entry_addr = 0;
+    uint64_t * pte_pointer = NULL;
+    hwaddr entry_addr = 0, pte_addr = 0;
 	ecpt_entry_t * ecpt_base;
 	ecpt_entry_t entry;
 
@@ -279,9 +277,20 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
             load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
             
-            if (entry.VPN_tag == vpn) {
+            if (ecpt_entry_match_vpn(&entry, vpn)) {
                 /* found */
-                pte = entry.pte;
+                if (gran == page_4KB) {
+                    pte_pointer = pte_offset_from_ecpt_entry(&entry, addr);
+                    *page_size = PAGE_SIZE_4KB;
+                } else if (gran == page_2MB) {
+                    pte_pointer = pmd_offset_from_ecpt_entry(&entry, addr);
+                    *page_size = PAGE_SIZE_2MB;
+                } else if (gran == page_1GB) {
+                    pte_pointer = pud_offset_from_ecpt_entry(&entry, addr);
+                    *page_size = PAGE_SIZE_1GB;
+                } else {
+                    assert(0);
+                }
 				break;
             } else {
                 /* not found move on */
@@ -289,27 +298,29 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         }
 	}
 
-    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: load from 0x%016lx pte=0x%016lx way=%d\n", entry_addr, pte, w);
+    
+    if (w < ECPT_TOTAL_WAY) {
+        /* If vpn is matched w must < ECPT_TOTAL_WAY  */
+        pte = *pte_pointer;
+        pte_addr = get_pte_addr(entry_addr, &entry, pte_pointer);
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx way=%d\n", 
+            entry_addr, pte_addr, pte, w);
+    } else {
+        /* This will lead to a page fault */
+        pte = 0;
+        pte_pointer = NULL;
+        pte_addr = 0;
+    }
+    
 
     uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
     ptep &= pte;
-
-    if (gran == page_4KB) {
-        *page_size = PAGE_SIZE_4KB;
-    } else if (gran == page_2MB) {
-        *page_size = PAGE_SIZE_2MB;
-    } else {
-        /* gran == page_1GB */
-        *page_size = PAGE_SIZE_1GB;
-    }
-
     
-    /*  */
     if (!(pte & PG_PRESENT_MASK)) {
 		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    fault triggered. Page not Present!\n");
         goto do_fault;
     }
-
+    
     /**
      * don't need these two symbols here since, we go to the following code if we are arriving at the leaf of the page table
      * 
@@ -378,7 +389,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         if (is_dirty) {
             pte |= PG_DIRTY_MASK;
         }
-        hwaddr pte_addr = get_pte_addr(entry_addr, addr);
+        // hwaddr pte_addr = get_pte_addr(entry_addr, addr);
         QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    update dirty at %lx pte=%lx!\n", pte_addr, pte );
         x86_stl_phys_notdirty(cs, pte_addr, pte);
     }
