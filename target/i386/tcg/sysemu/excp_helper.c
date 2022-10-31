@@ -474,9 +474,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
      *      translation only for 2MB right now
      */
     uint64_t size = GET_HPT_SIZE(cr3);
-    uint64_t hash = gen_hash(ADDR_TO_PAGE_NUM_2MB(addr) , size);
-
-    // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: hash=0x%lx vpn =0x%llx size=0x%lx\n", hash, ADDR_TO_PAGE_NUM_2MB(addr), size);
+    uint64_t hash = gen_hash(ADDR_REMOVE_OFFSET_SHIFT_2MB(addr) , size);
     
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
@@ -580,7 +578,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     /* align to page_size */
     // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     page_offset = ADDR_TO_OFFSET_2MB(addr);
-    pte = PAGE_NUM_TO_ADDR_2MB(ADDR_TO_PAGE_NUM_2MB(pte));
+    pte = SHIFT_TO_ADDR_2MB(ADDR_REMOVE_OFFSET_SHIFT_2MB(pte));
     pte = pte & PG_ADDRESS_MASK;
     *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
     return PG_ERROR_OK;
