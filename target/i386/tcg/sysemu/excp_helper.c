@@ -407,14 +407,14 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     if (gran == page_4KB) {
         page_offset = ADDR_TO_OFFSET_4KB(addr);
-        pte = PAGE_NUM_TO_ADDR_4KB(ADDR_TO_PAGE_NUM_4KB(pte));
+        pte = SHIFT_TO_ADDR_4KB(ADDR_REMOVE_OFFSET_SHIFT_4KB(pte));
     } else if (gran == page_2MB) {
         page_offset = ADDR_TO_OFFSET_2MB(addr);
-        pte = PAGE_NUM_TO_ADDR_2MB(ADDR_TO_PAGE_NUM_2MB(pte));
+        pte = SHIFT_TO_ADDR_2MB(ADDR_REMOVE_OFFSET_SHIFT_2MB(pte));
     } else {
         /* gran == page_1GB */
         page_offset = ADDR_TO_OFFSET_1GB(addr);
-        pte = PAGE_NUM_TO_ADDR_1GB(ADDR_TO_PAGE_NUM_1GB(pte));
+        pte = SHIFT_TO_ADDR_1GB(ADDR_REMOVE_OFFSET_SHIFT_1GB(pte));
     }
     
     pte = pte & PG_ADDRESS_MASK;
