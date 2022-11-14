@@ -47,34 +47,86 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define ECPT_CLUSTER_NBITS 3
 #define ECPT_CLUSTER_FACTOR (1 << ECPT_CLUSTER_NBITS)
 
+/**
+ *  number of bits reproposed for VPN
+ * 		starting from bits 52 until 57
+ * 		where bits 58 to 52 are marked as available from AMD manual
+ * 		note that bit 58 is already used by linux kernel as #define _PAGE_BIT_DEVMAP	_PAGE_BIT_SOFTW4
+  */
+#define PTE_REPROPOSE_VPN_BITS 5
+
+#if (PTE_REPROPOSE_VPN_BITS * ECPT_CLUSTER_FACTOR) < (48 - PAGE_SHIFT_4KB - ECPT_CLUSTER_NBITS)
+#error Insufficient PTE_REPROPOSE_VPN_BITS
+#endif
+
+#if PTE_REPROPOSE_VPN_BITS > 6
+#error PTE_REPROPOSE_VPN_BITS overflow
+#endif
+
+#if PTE_REPROPOSE_VPN_BITS > 0
+
+#if PTE_REPROPOSE_VPN_BITS == 5
+	#define PTE_VPN_MASK (0x01f0000000000000LL)
+	#define VPN_TAIL_MASK (0x000000000000001fLL)
+	#define PTE_VPN_SHIFT (52)
+
+	/* start from e->pte[PTE_IDX_FOR_COUNT] to e->pte[ECPT_CLUSTER_FACTOR] 
+		will be used to count how many valid ptes are in the entry*/
+	#define PTE_IDX_FOR_COUNT (7)
+#endif	
+
+
+#define GET_PARTIAL_VPN_BASE(pte) ( (pte & PTE_VPN_MASK) >> PTE_VPN_SHIFT )
+#define GET_PARTIAL_VPN_SHIFTED(pte, idx) (GET_PARTIAL_VPN_BASE(pte) << (idx * PTE_REPROPOSE_VPN_BITS))
+#define GET_VALID_PTE_COUNT(pte) GET_PARTIAL_VPN_BASE(pte)
+
+
+#endif
+
+#define VIRTUAL_ADDR_MASK (0x0000ffffffffffffLL)
+
 #define PAGE_SIZE_4KB (1UL << PAGE_SHIFT_4KB)
 #define PAGE_SIZE_2MB (1UL << PAGE_SHIFT_2MB)
 #define PAGE_SIZE_1GB (1UL << PAGE_SHIFT_1GB)
 #define PAGE_SIZE_512GB (1UL << PAGE_SHIFT_512GB)
 
-#define ADDR_REMOVE_OFFSET_4KB(x)   (((x) & ~PAGE_TAIL_MASK_4KB) & PG_ADDRESS_MASK)
-#define ADDR_REMOVE_OFFSET_2MB(x)   (((x) & ~PAGE_TAIL_MASK_2MB) & PG_ADDRESS_MASK)
-#define ADDR_REMOVE_OFFSET_1GB(x)   (((x) & ~PAGE_TAIL_MASK_1GB) & PG_ADDRESS_MASK)
+#define VADDR_TO_PAGE_NUM_NO_CLUSTER_4KB(x)   (((x) & VIRTUAL_ADDR_MASK) >> (PAGE_SHIFT_4KB))
+#define VADDR_TO_PAGE_NUM_NO_CLUSTER_2MB(x)   (((x) & VIRTUAL_ADDR_MASK) >> (PAGE_SHIFT_2MB))
+#define VADDR_TO_PAGE_NUM_NO_CLUSTER_1GB(x)   (((x) & VIRTUAL_ADDR_MASK) >> (PAGE_SHIFT_1GB))
+
+#define VADDR_TO_PAGE_NUM_4KB(x)   (VADDR_TO_PAGE_NUM_NO_CLUSTER_4KB(x) >> ECPT_CLUSTER_NBITS)
+#define VADDR_TO_PAGE_NUM_2MB(x)   (VADDR_TO_PAGE_NUM_NO_CLUSTER_2MB(x) >> ECPT_CLUSTER_NBITS)
+#define VADDR_TO_PAGE_NUM_1GB(x)   (VADDR_TO_PAGE_NUM_NO_CLUSTER_1GB(x) >> ECPT_CLUSTER_NBITS)
+
+
+#define PTE_TO_PADDR(pte)   ((pte) & PG_ADDRESS_MASK)
+#define PTE_TO_PADDR_4KB(pte)   (((pte) & ~PAGE_TAIL_MASK_4KB) & PG_ADDRESS_MASK)
+#define PTE_TO_PADDR_2MB(pte)   (((pte) & ~PAGE_TAIL_MASK_2MB) & PG_ADDRESS_MASK)
+#define PTE_TO_PADDR_1GB(pte)   (((pte) & ~PAGE_TAIL_MASK_1GB) & PG_ADDRESS_MASK)
+
+// #define ADDR_REMOVE_OFFSET_4KB(x)   (((x) & ~PAGE_TAIL_MASK_4KB) & VIRTUAL_ADDR_MASK)
+// #define ADDR_REMOVE_OFFSET_2MB(x)   (((x) & ~PAGE_TAIL_MASK_2MB) & VIRTUAL_ADDR_MASK)
+// #define ADDR_REMOVE_OFFSET_1GB(x)   (((x) & ~PAGE_TAIL_MASK_1GB) & VIRTUAL_ADDR_MASK)
 
 #define ADDR_TO_OFFSET_4KB(x)   ((x) & PAGE_TAIL_MASK_4KB)
 #define ADDR_TO_OFFSET_2MB(x)   ((x) & PAGE_TAIL_MASK_2MB)
 #define ADDR_TO_OFFSET_1GB(x)   ((x) & PAGE_TAIL_MASK_1GB)
 
-#define ADDR_REMOVE_OFFSET_SHIFT_4KB(x)   ((ADDR_REMOVE_OFFSET_4KB(x)) >> (PAGE_SHIFT_4KB ))
-#define ADDR_REMOVE_OFFSET_SHIFT_2MB(x)   ((ADDR_REMOVE_OFFSET_2MB(x)) >> (PAGE_SHIFT_2MB ))
-#define ADDR_REMOVE_OFFSET_SHIFT_1GB(x)   ((ADDR_REMOVE_OFFSET_1GB(x)) >> (PAGE_SHIFT_1GB ))
+// #define ADDR_REMOVE_OFFSET_SHIFT_4KB(x)   ((ADDR_REMOVE_OFFSET_4KB(x)) >> (PAGE_SHIFT_4KB ))
+// #define ADDR_REMOVE_OFFSET_SHIFT_2MB(x)   ((ADDR_REMOVE_OFFSET_2MB(x)) >> (PAGE_SHIFT_2MB ))
+// #define ADDR_REMOVE_OFFSET_SHIFT_1GB(x)   ((ADDR_REMOVE_OFFSET_1GB(x)) >> (PAGE_SHIFT_1GB ))
 
-#define SHIFT_TO_ADDR_4KB(x)   (((uint64_t) x) << (PAGE_SHIFT_4KB))
-#define SHIFT_TO_ADDR_2MB(x)   (((uint64_t) x) << (PAGE_SHIFT_2MB))
-#define SHIFT_TO_ADDR_1GB(x)   (((uint64_t) x) << (PAGE_SHIFT_1GB))
+// #define SHIFT_TO_ADDR_4KB(x)   (((uint64_t) x) << (PAGE_SHIFT_4KB))
+// #define SHIFT_TO_ADDR_2MB(x)   (((uint64_t) x) << (PAGE_SHIFT_2MB))
+// #define SHIFT_TO_ADDR_1GB(x)   (((uint64_t) x) << (PAGE_SHIFT_1GB))
 
-#define ADDR_TO_PAGE_NUM_4KB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_4KB(x)) >> (ECPT_CLUSTER_NBITS))
-#define ADDR_TO_PAGE_NUM_2MB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_2MB(x)) >> (ECPT_CLUSTER_NBITS))
-#define ADDR_TO_PAGE_NUM_1GB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_1GB(x)) >> (ECPT_CLUSTER_NBITS))
+// #define ADDR_TO_PAGE_NUM_4KB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_4KB(x)) >> (ECPT_CLUSTER_NBITS))
+// #define ADDR_TO_PAGE_NUM_2MB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_2MB(x)) >> (ECPT_CLUSTER_NBITS))
+// #define ADDR_TO_PAGE_NUM_1GB(x)   ((ADDR_REMOVE_OFFSET_SHIFT_1GB(x)) >> (ECPT_CLUSTER_NBITS))
 
-#define PAGE_NUM_TO_ADDR_4KB(x)   (SHIFT_TO_ADDR_4KB(x) << (ECPT_CLUSTER_NBITS))
-#define PAGE_NUM_TO_ADDR_2MB(x)   (SHIFT_TO_ADDR_2MB(x) << (ECPT_CLUSTER_NBITS))
-#define PAGE_NUM_TO_ADDR_1GB(x)   (SHIFT_TO_ADDR_1GB(x) << (ECPT_CLUSTER_NBITS))
+// #define PAGE_NUM_TO_ADDR_4KB(x)   (SHIFT_TO_ADDR_4KB(x) << (ECPT_CLUSTER_NBITS))
+// #define PAGE_NUM_TO_ADDR_2MB(x)   (SHIFT_TO_ADDR_2MB(x) << (ECPT_CLUSTER_NBITS))
+// #define PAGE_NUM_TO_ADDR_1GB(x)   (SHIFT_TO_ADDR_1GB(x) << (ECPT_CLUSTER_NBITS))
 
 #define HPT_SIZE_MASK (0xfff)      	/* 16 * cr3[0:11] for number of entries */
 #define HPT_SIZE_HIDDEN_BITS (4)    
@@ -131,7 +183,6 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 extern uint32_t way_to_crN[ECPT_MAX_WAY];
 
 typedef struct ecpt_entry{
-    uint64_t VPN_tag;
     uint64_t pte[ECPT_CLUSTER_FACTOR];
 } ecpt_entry_t;
 
@@ -167,7 +218,16 @@ static inline uint64_t * pud_offset_from_ecpt_entry(struct ecpt_entry *entry, ui
 
 static inline uint64_t ecpt_entry_get_vpn(ecpt_entry_t * e) 
 {
-	return e->VPN_tag;
+	uint64_t vpn = 0;
+	for (uint16_t i = 0; i < ECPT_CLUSTER_FACTOR && i < PTE_IDX_FOR_COUNT; i++) {
+		vpn |= GET_PARTIAL_VPN_SHIFTED(e->pte[i], i);
+	}
+	return vpn;
+}
+
+static inline uint16_t ecpt_entry_get_pte_num(ecpt_entry_t * e) 
+{
+	return GET_VALID_PTE_COUNT(e->pte[PTE_IDX_FOR_COUNT]);
 }
 
 static inline int ecpt_entry_match_vpn(ecpt_entry_t *entry, uint64_t vpn) {

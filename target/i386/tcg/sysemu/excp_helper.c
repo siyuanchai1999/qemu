@@ -180,7 +180,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     uint64_t rsvd_mask = PG_ADDRESS_MASK & ~MAKE_64BIT_MASK(0, cpu->phys_bits);
     uint32_t page_offset;
     uint32_t pkr;
-
+    hwaddr paddr;
     /**
      * TODO: support more granularity
      */
@@ -219,27 +219,27 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 		/* In real hardware, this should be done in parallel */
 		if (w < ECPT_4K_WAY) {
             gran = page_4KB;
-            vpn = ADDR_TO_PAGE_NUM_4KB(addr); 
+            vpn = VADDR_TO_PAGE_NUM_4KB(addr); 
         } 
         else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
             gran = page_2MB;
-			vpn = ADDR_TO_PAGE_NUM_2MB(addr);
+			vpn = VADDR_TO_PAGE_NUM_2MB(addr);
         } 
         else if (w < ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY) {
             gran = page_1GB;
-			vpn = ADDR_TO_PAGE_NUM_1GB(addr);
+			vpn = VADDR_TO_PAGE_NUM_1GB(addr);
         } 
         else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY) {
             gran = page_4KB;
-            vpn = ADDR_TO_PAGE_NUM_4KB(addr);  
+            vpn = VADDR_TO_PAGE_NUM_4KB(addr);  
         } 
         else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY) {
             gran = page_2MB;
-			vpn = ADDR_TO_PAGE_NUM_2MB(addr);
+			vpn = VADDR_TO_PAGE_NUM_2MB(addr);
         } 
         else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY + ECPT_1G_USER_WAY) {
             gran = page_1GB;
-			vpn = ADDR_TO_PAGE_NUM_1GB(addr);
+			vpn = VADDR_TO_PAGE_NUM_1GB(addr);
         } else {
             assert(0);
         }
@@ -407,18 +407,25 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     if (gran == page_4KB) {
         page_offset = ADDR_TO_OFFSET_4KB(addr);
-        pte = SHIFT_TO_ADDR_4KB(ADDR_REMOVE_OFFSET_SHIFT_4KB(pte));
+        
     } else if (gran == page_2MB) {
         page_offset = ADDR_TO_OFFSET_2MB(addr);
-        pte = SHIFT_TO_ADDR_2MB(ADDR_REMOVE_OFFSET_SHIFT_2MB(pte));
+        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
+            goto do_fault_rsvd;
+        }
+
     } else {
         /* gran == page_1GB */
         page_offset = ADDR_TO_OFFSET_1GB(addr);
-        pte = SHIFT_TO_ADDR_1GB(ADDR_REMOVE_OFFSET_SHIFT_1GB(pte));
+        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
+            goto do_fault_rsvd;
+        }
     }
     
-    pte = pte & PG_ADDRESS_MASK;
-    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
+    paddr = PTE_TO_PADDR(pte);
+    paddr += page_offset;
+    // pte = pte & PG_ADDRESS_MASK;
+    *xlat = GET_HPHYS(cs, paddr, is_write1, prot);
     return PG_ERROR_OK;
 
  do_fault_rsvd:
@@ -451,7 +458,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     uint64_t rsvd_mask = PG_ADDRESS_MASK & ~MAKE_64BIT_MASK(0, cpu->phys_bits);
     uint32_t page_offset;
     uint32_t pkr;
-
+    hwaddr  paddr;
     // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "2M_basic Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%016lx\n",
         //    addr, is_write1, mmu_idx, cr3);
     // printf("Translate: addr=%" VADDR_PRIx " w=%d mmu=%d cr3=0x%16lx\n",
@@ -474,7 +481,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
      *      translation only for 2MB right now
      */
     uint64_t size = GET_HPT_SIZE(cr3);
-    uint64_t hash = gen_hash(ADDR_REMOVE_OFFSET_SHIFT_2MB(addr) , size);
+    uint64_t hash = gen_hash(VADDR_TO_PAGE_NUM_NO_CLUSTER_2MB(addr) , size);
     
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
@@ -578,9 +585,15 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     /* align to page_size */
     // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     page_offset = ADDR_TO_OFFSET_2MB(addr);
-    pte = SHIFT_TO_ADDR_2MB(ADDR_REMOVE_OFFSET_SHIFT_2MB(pte));
-    pte = pte & PG_ADDRESS_MASK;
-    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
+    // pte = SHIFT_TO_ADDR_2MB(ADDR_REMOVE_OFFSET_SHIFT_2MB(pte));
+    // pte = pte & PG_ADDRESS_MASK;
+    if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
+        goto do_fault_rsvd;
+    }
+
+    paddr = PTE_TO_PADDR(pte);
+    paddr += page_offset;
+    *xlat = GET_HPHYS(cs, paddr, is_write1, prot);
     return PG_ERROR_OK;
 
  do_fault_rsvd:
