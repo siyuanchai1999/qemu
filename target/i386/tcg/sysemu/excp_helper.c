@@ -204,7 +204,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      * 
      */
     int w;
-    uint64_t vpn, size, hash, cr, pte = 0, rehash_ptr;
+    uint64_t vpn, size, hash, cr, pte = 0;
+    uint64_t rehash_ptr, rehash_way, rehash_cr, rehash_size, rehash_hash;
     uint64_t * pte_pointer = NULL;
     hwaddr entry_addr = 0, pte_addr = 0;
 	ecpt_entry_t * ecpt_base;
@@ -212,8 +213,11 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
 
 	for (w = 0; w < ECPT_TOTAL_WAY; w++) {
-		
-
+		rehash_ptr = 0;
+        rehash_way = 0;
+        rehash_cr = 0;
+        rehash_size = 0;
+        rehash_hash = 0;
 
 		/* go through all the ways to search for matching tag  */
 		/* In real hardware, this should be done in parallel */
@@ -259,43 +263,58 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 		hash = gen_hash64(vpn, size, w);
 		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
 
-        rehash_ptr = 0;
+        rehash_ptr = GET_HPT_REHASH_PTR(cr);
 
         if (hash < rehash_ptr) {
             /* not supported for resizing now */
-            /* rehash_ptr MBZ right now */
-            assert(0);
+            rehash_way = find_rehash_way(w);
+            rehash_cr = env->cr[way_to_crN[rehash_way]];
+            rehash_size = GET_HPT_SIZE(rehash_cr);
+
+            /* we use the original way's hash function now */
+            /* TODO: change the hash function with size as seed */
+            rehash_hash = gen_hash64(vpn, rehash_size, w);
+
+            qemu_log("    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
+                rehash_way, rehash_hash, vpn, rehash_size);
+
+            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
+                rehash_way, rehash_hash, vpn, rehash_size);
+
+            ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(rehash_cr);
+            entry_addr = (uint64_t) &ecpt_base[rehash_hash];
+
         } else {
             /* stay with current hash table */
-
             ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(cr);
             entry_addr = (uint64_t) &ecpt_base[hash];
+        }
             // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
 
-            /* do nothing for now, cuz nested paging is not enabled */
-            entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
+         /* do nothing for now, cuz nested paging is not enabled */
+        entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
 
-            load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
-            
-            if (ecpt_entry_match_vpn(&entry, vpn)) {
-                /* found */
-                if (gran == page_4KB) {
-                    pte_pointer = pte_offset_from_ecpt_entry(&entry, addr);
-                    *page_size = PAGE_SIZE_4KB;
-                } else if (gran == page_2MB) {
-                    pte_pointer = pmd_offset_from_ecpt_entry(&entry, addr);
-                    *page_size = PAGE_SIZE_2MB;
-                } else if (gran == page_1GB) {
-                    pte_pointer = pud_offset_from_ecpt_entry(&entry, addr);
-                    *page_size = PAGE_SIZE_1GB;
-                } else {
-                    assert(0);
-                }
-				break;
+        load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
+        
+        if (ecpt_entry_match_vpn(&entry, vpn)) {
+            /* found */
+            if (gran == page_4KB) {
+                pte_pointer = pte_offset_from_ecpt_entry(&entry, addr);
+                *page_size = PAGE_SIZE_4KB;
+            } else if (gran == page_2MB) {
+                pte_pointer = pmd_offset_from_ecpt_entry(&entry, addr);
+                *page_size = PAGE_SIZE_2MB;
+            } else if (gran == page_1GB) {
+                pte_pointer = pud_offset_from_ecpt_entry(&entry, addr);
+                *page_size = PAGE_SIZE_1GB;
             } else {
-                /* not found move on */
+                assert(0);
             }
+            break;
+        } else {
+            /* not found move on */
         }
+
 	}
 
     
@@ -305,6 +324,11 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         pte_addr = get_pte_addr(entry_addr, &entry, pte_pointer);
         QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx way=%d\n", 
             entry_addr, pte_addr, pte, w);
+
+        if (hash < rehash_ptr) {
+            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    ECPT Translate: Elastic load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx rehash_way=%ld\n",
+                entry_addr, pte_addr, pte, rehash_way);
+        }
     } else {
         /* This will lead to a page fault */
         pte = 0;

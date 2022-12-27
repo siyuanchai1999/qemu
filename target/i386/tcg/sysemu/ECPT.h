@@ -155,8 +155,21 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 
 #define ECPT_TOTAL_WAY (ECPT_KERNEL_WAY + ECPT_USER_WAY)
 
+#define ECPT_REHASH_WAY 3
 /* ECPT_TOTAL_WAY <= ECPT_MAX_WAY*/
-#define ECPT_MAX_WAY 9
+#define ECPT_MAX_WAY 12
+
+#if ECPT_MAX_WAY < ECPT_TOTAL_WAY + ECPT_REHASH_WAY 
+	#error "ECPT_MAX_WAY exceeded"
+#endif
+
+#define HPT_REHASH_SHIFT (53)
+#define REHASH_MASK (~((1ULL << HPT_REHASH_SHIFT) - 1))
+#define GET_HPT_REHASH_PTR(cr) GET_HPT_SIZE(((uint64_t) cr) >> HPT_REHASH_SHIFT)
+
+#define REHASH_PTR_MAX (1 << (64 - HPT_REHASH_SHIFT))
+#define REHASH_PTR_TO_CR(ptr) (((uint64_t) ptr) << HPT_REHASH_SHIFT)
+#define GET_CR_WITHOUT_REHASH(cr) (cr & (~REHASH_MASK))
 
 /**
  *  
@@ -233,5 +246,7 @@ static inline uint16_t ecpt_entry_get_pte_num(ecpt_entry_t * e)
 static inline int ecpt_entry_match_vpn(ecpt_entry_t *entry, uint64_t vpn) {
 	return ecpt_entry_get_vpn(entry) == vpn;
 }
+
+uint32_t find_rehash_way(uint32_t way);
 
 #endif /* ECPT_H */

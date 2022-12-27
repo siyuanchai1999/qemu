@@ -145,13 +145,12 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         env->cr[reg] = t0;
         break;
     }
-    if (reg == 3) {
-        for (uint16_t i = 0; i < 12; i++) {
+    if (reg == 3 || reg > ECPT_TOTAL_WAY) {
+        for (uint16_t i = 0; i < ECPT_MAX_WAY; i++) {
             qemu_log_mask(CPU_LOG_MMU,
                             "cr[%d]=%lx\n", i, env->cr[i]);
         }
     }
-    
 }
 
 void helper_wrmsr(CPUX86State *env)
