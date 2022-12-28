@@ -29,4 +29,5 @@ uint64_t crc64_be(uint64_t crc, const void* p, uint64_t len);
  */
 uint64_t ecpt_crc64_hash(uint64_t vpn, uint32_t way);
 
+uint64_t MurmurHash64(const void *key, uint64_t len, uint64_t seed);
 #endif /* ECPT_HASH_H */
