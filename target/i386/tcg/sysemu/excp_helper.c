@@ -118,15 +118,19 @@ struct hash_combinator {
 } __attribute__((__packed__));
 
 static uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) {
-    
+#ifdef TARGET_X86_64_ECPT_CRC64
     // uint64_t hash = crc_64_multi_hash(vpn, size, way);
-    // uint64_t hash = ecpt_crc64_hash(vpn, way);
+    uint64_t hash = ecpt_crc64_hash(vpn, way);
+#endif 
+
+#ifdef TARGET_X86_64_ECPT_MURMUR64
     struct hash_combinator hash_combo = { .vpn = vpn,
 					      .size = size * SIZE_PRIME,
 					      .way = way };
 	uint64_t hash =
 		MurmurHash64(&hash_combo, sizeof(struct hash_combinator), 0);
-        
+#endif 
+
     hash = hash % size;
 
     if (hash > size) {
