@@ -109,6 +109,8 @@ static uint64_t gen_hash(uint64_t vpn, uint64_t size) {
 //     return hash;
 // }
 
+#define SIZE_PRIME 98317
+
 struct hash_combinator {
 	uint64_t vpn;
 	uint64_t size;
@@ -120,7 +122,7 @@ static uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) {
     // uint64_t hash = crc_64_multi_hash(vpn, size, way);
     // uint64_t hash = ecpt_crc64_hash(vpn, way);
     struct hash_combinator hash_combo = { .vpn = vpn,
-					      .size = size,
+					      .size = size * SIZE_PRIME,
 					      .way = way };
 	uint64_t hash =
 		MurmurHash64(&hash_combo, sizeof(struct hash_combinator), 0);
