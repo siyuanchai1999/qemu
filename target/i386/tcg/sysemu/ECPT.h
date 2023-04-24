@@ -147,7 +147,7 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define ECPT_1G_WAY 0
 
 #define ECPT_4K_USER_WAY 2
-#define ECPT_2M_USER_WAY 0
+#define ECPT_2M_USER_WAY 2
 #define ECPT_1G_USER_WAY 0
 
 #define ECPT_KERNEL_WAY (ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY)
@@ -246,6 +246,39 @@ static inline uint16_t ecpt_entry_get_pte_num(ecpt_entry_t * e)
 static inline int ecpt_entry_match_vpn(ecpt_entry_t *entry, uint64_t vpn) {
 	return ecpt_entry_get_vpn(entry) == vpn;
 }
+
+#define REP0(X)
+#define REP1(X) X
+#define REP2(X) REP1(X) X
+#define REP3(X) REP2(X) X
+#define REP4(X) REP3(X) X
+#define REP5(X) REP4(X) X
+#define REP6(X) REP5(X) X
+#define REP7(X) REP6(X) X
+#define REP8(X) REP7(X) X
+#define REP9(X) REP8(X) X
+#define REP10(X) REP9(X) X
+
+#define PTE_0(e) (e)->pte[0]
+#define PTE_1(e) PTE_0(e), (e)->pte[1]
+#define PTE_2(e) PTE_1(e), (e)->pte[2]
+#define PTE_3(e) PTE_2(e), (e)->pte[3]
+#define PTE_4(e) PTE_3(e), (e)->pte[4]
+#define PTE_5(e) PTE_4(e), (e)->pte[5]
+#define PTE_6(e) PTE_5(e), (e)->pte[6]
+#define PTE_7(e) PTE_6(e), (e)->pte[7]
+
+
+#define PTE_ARRAY_FMT REP8("%016lx ")
+#define PTE_ARRAY_PRINT(e) PTE_7(e)
+
+#define PRINT_ECPT_ENTRY(e) \
+	do { \
+    	QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "\t\t{.vpn=%lx .pte={" PTE_ARRAY_FMT "}}\n",\
+			ecpt_entry_get_vpn(e), PTE_ARRAY_PRINT(e) \
+		); \
+  	} while (0)
+
 
 uint32_t find_rehash_way(uint32_t way);
 
