@@ -137,9 +137,15 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define GET_HPT_BASE(cr3) (((uint64_t) cr3) & HPT_BASE_MASK )
 // #define GET_HPT_REHASH_PTR(cr3) ((((uint64_t) cr3) & HPT_REHASH_PTR_MASK ) >> (52 - HPT_SIZE_HIDDEN_BITS))
 
-#define CR3_TRANSITION_SHIFT (52)
+#define CR3_TRANSITION_SHIFT (63)
 #define CR3_TRANSITION_BIT (1ULL << CR3_TRANSITION_SHIFT)
-
+/* Note: technically we eat one bit of available physical address
+	This can be avoided by define ECPT_DESC_SHIFT to (12 - 3)
+	where 2^3 is the size of long long int, which is the minimum alignment from kmalloc.
+ */
+#define ECPT_DESC_SHIFT (PAGE_SHIFT_4KB)
+#define ECPT_DESC_PA_TO_CR3_FORMAT(x)                                          \
+	(((x) << ECPT_DESC_SHIFT) | CR3_TRANSITION_BIT)
 
 #define ECPT_4K_WAY 2
 #define ECPT_2M_WAY 2

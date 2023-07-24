@@ -103,9 +103,15 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         break;
     case 3:
 		
-		cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~CR3_TRANSITION_BIT);
-		qemu_log_mask(CPU_LOG_MMU,
-                        "phys_bits=%d mask=%lx\n", env_archcpu(env)->phys_bits, cr3_invalid_mask);
+		// cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~CR3_TRANSITION_BIT);
+#ifdef TARGET_X86_64_ECPT 
+        /* for ecpt we use all 64 bits available */
+        cr3_invalid_mask =
+            (((~0ULL) << (env_archcpu(env)->phys_bits + ECPT_DESC_SHIFT)) &
+             ~CR3_TRANSITION_BIT);
+        qemu_log_mask(CPU_LOG_MMU, "phys_bits=%d mask=%lx\n",
+                      env_archcpu(env)->phys_bits, cr3_invalid_mask);
+#endif
 
         if ((env->efer & MSR_EFER_LMA) &&
                 (t0 & cr3_invalid_mask)) {
@@ -486,6 +492,25 @@ void helper_rdmsr(CPUX86State *env)
         val = x86_cpu->ucode_rev;
         break;
     default:
+
+#ifdef TARGET_X86_64_ECPT
+        if ((uint32_t)env->regs[R_ECX] >= MSR_ECPT_START && (uint32_t)env->regs[R_ECX] < MSR_ECPT_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_ECPT_START;
+            val = env->ecpt_msr[offset];
+            qemu_log_mask(CPU_LOG_MMU,
+                            " read ecpt_msr[%d]=%lx\n", offset, val);
+            break;
+        }
+
+        if ((uint32_t)env->regs[R_ECX] >= MSR_CWT_START && (uint32_t)env->regs[R_ECX] < MSR_CWT_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_CWT_START;
+            val = env->cwt_msr[offset];
+            qemu_log_mask(CPU_LOG_MMU,
+                            "read cwt_msr[%d]=%lx\n", offset, val);
+            break;
+        }
+#endif
+
         if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL
             && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL +
             (4 * env->mcg_cap & 0xff)) {
