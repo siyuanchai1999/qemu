@@ -1,2 +1,2 @@
 #!/bin/bash
-./configure --target-list=x86_64-softmmu --enable-debug
+./configure --target-list=x86_64-softmmu --enable-debug --disable-linux-io-uring

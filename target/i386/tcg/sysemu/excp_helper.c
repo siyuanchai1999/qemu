@@ -26,6 +26,8 @@
 #include "ECPT_hash.h"
 #include "ECPT.h"
 
+#include "build/x86_64-softmmu-config-target.h"
+
 #define QEMU_LOG_TRANSLATE(gdb, MASK, FMT, ...)   \
     do {                                                \
         if (likely(!gdb)) {       \
@@ -230,7 +232,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 	ecpt_entry_t entry;
 
 
-	for (w = 0; w < ECPT_TOTAL_WAY; w++) {
+	for (w = 0; w < ECPT_TOTAL_WAY; w++) 
+    {
 		rehash_ptr = 0;
         rehash_way = 0;
         rehash_cr = 0;
@@ -266,8 +269,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
             assert(0);
         }
 
-		cr = env->cr[way_to_crN[w]];
-
+		// cr = env->cr[way_to_crN[w]];
+        cr = env->ecpt_msr[w];
 		size = GET_HPT_SIZE(cr);
 
         if (!size) {
@@ -279,22 +282,23 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         }
 
 		hash = gen_hash64(vpn, size, w);
-		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, hash, vpn, size);
+		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d ECPT_TOTAL_WAY=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, ECPT_TOTAL_WAY, hash, vpn, size);
 
         rehash_ptr = GET_HPT_REHASH_PTR(cr);
 
         if (hash < rehash_ptr) {
             /* not supported for resizing now */
             rehash_way = find_rehash_way(w);
-            rehash_cr = env->cr[way_to_crN[rehash_way]];
+            // rehash_cr = env->cr[way_to_crN[rehash_way]];
+            rehash_cr = env->ecpt_msr[rehash_way];
             rehash_size = GET_HPT_SIZE(rehash_cr);
 
             /* we use the original way's hash function now */
             /* TODO: change the hash function with size as seed */
             rehash_hash = gen_hash64(vpn, rehash_size, w);
 
-            qemu_log("    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
-                rehash_way, rehash_hash, vpn, rehash_size);
+            // qemu_log("    Translate: Elastic addr=%lx w=%d hash=0x%lx rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx \n",
+            //     addr, w, hash, rehash_way, rehash_hash, vpn, rehash_size);
 
             QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
                 rehash_way, rehash_hash, vpn, rehash_size);
@@ -307,13 +311,16 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
             ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(cr);
             entry_addr = (uint64_t) &ecpt_base[hash];
         }
-            // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", entry_addr);
+        
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx base at 0x%016lx\n", entry_addr, (uint64_t) ecpt_base);
 
          /* do nothing for now, cuz nested paging is not enabled */
         entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
-
+        
         load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
         
+        PRINT_ECPT_ENTRY((&entry));
+
         if (ecpt_entry_match_vpn(&entry, vpn)) {
             /* found */
             if (gran == page_4KB) {

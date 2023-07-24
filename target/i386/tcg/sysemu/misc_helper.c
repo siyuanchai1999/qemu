@@ -306,6 +306,25 @@ void helper_wrmsr(CPUX86State *env)
         cpu_sync_bndcs_hflags(env);
         break;
     default:
+
+#ifdef TARGET_X86_64_ECPT
+        if ((uint32_t)env->regs[R_ECX] >= MSR_ECPT_START && (uint32_t)env->regs[R_ECX] < MSR_ECPT_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_ECPT_START;
+            env->ecpt_msr[offset] = val;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "ecpt_msr[%d]=%lx\n", offset, env->ecpt_msr[offset]);
+            break;
+        }
+
+        if ((uint32_t)env->regs[R_ECX] >= MSR_CWT_START && (uint32_t)env->regs[R_ECX] < MSR_CWT_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_CWT_START;
+            env->cwt_msr[offset] = val;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "cwt_msr[%d]=%lx\n", offset, env->cwt_msr[offset]);
+            break;
+        }
+#endif
+
         if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL
             && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL +
             (4 * env->mcg_cap & 0xff)) {

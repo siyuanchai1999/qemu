@@ -26,6 +26,11 @@
 #include "exec/cpu-defs.h"
 #include "qapi/qapi-types-common.h"
 
+#include "build/x86_64-softmmu-config-target.h"
+
+#ifdef TARGET_X86_64_ECPT
+    #include "tcg/sysemu/ECPT.h"
+#endif
 
 /* The x86 has a strong memory model with some store-after-load re-ordering */
 #define TCG_GUEST_DEFAULT_MO      (TCG_MO_ALL & ~TCG_MO_ST_LD)
@@ -529,6 +534,13 @@ typedef enum X86Seg {
 #define MSR_IA32_VMX_TRUE_EXIT_CTLS      0x0000048f
 #define MSR_IA32_VMX_TRUE_ENTRY_CTLS     0x00000490
 #define MSR_IA32_VMX_VMFUNC             0x00000491
+
+#ifdef TARGET_X86_64_ECPT
+    #define MSR_ECPT_START                0x00004000
+    #define MSR_ECPT_END                  (MSR_ECPT_START + ECPT_MAX_WAY)
+    #define MSR_CWT_START                0x00004020
+    #define MSR_CWT_END                  (MSR_CWT_START + CWT_MAX_WAY)
+#endif
 
 #define XSTATE_FP_BIT                   0
 #define XSTATE_SSE_BIT                  1
@@ -1460,6 +1472,13 @@ typedef struct CPUX86State {
 #else 
     target_ulong cr[5]; /* NOTE: cr1 is unused */
 #endif
+
+#ifdef TARGET_X86_64_ECPT
+    /* msr registers for ECPT and CWT*/
+	uint64_t ecpt_msr[ECPT_MAX_WAY];
+    uint64_t cwt_msr[CWT_MAX_WAY];
+#endif
+
 	int32_t a20_mask;
 
     BNDReg bnd_regs[4];

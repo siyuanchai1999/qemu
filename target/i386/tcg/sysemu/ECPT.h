@@ -2,7 +2,6 @@
 #define ECPT_H
 
 #include "qemu/osdep.h"
-#include "exec/log.h"
 
 // #define PAGE_HEADER_MASK (0xffff000000000000)
 // #define PAGE_TAIL_MASK_4KB (0xfff)
@@ -281,5 +280,18 @@ static inline int ecpt_entry_match_vpn(ecpt_entry_t *entry, uint64_t vpn) {
 
 
 uint32_t find_rehash_way(uint32_t way);
+
+#define CWT_2MB_KERNEL_N_WAY 2
+#define CWT_1GB_KERNEL_N_WAY 2
+#define CWT_2MB_USER_N_WAY 2
+#define CWT_1GB_USER_N_WAY 2
+#define CWT_TOTAL_N_WAY                                                        \
+        (CWT_2MB_KERNEL_N_WAY + CWT_1GB_KERNEL_N_WAY + CWT_2MB_USER_N_WAY +    \
+         CWT_1GB_USER_N_WAY)
+
+#define CWT_MAX_WAY 10
+#if CWT_MAX_WAY < CWT_TOTAL_N_WAY
+#error "CWT_MAX_WAY exceeded"
+#endif
 
 #endif /* ECPT_H */
