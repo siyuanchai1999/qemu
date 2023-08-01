@@ -540,6 +540,8 @@ typedef enum X86Seg {
     #define MSR_ECPT_END                  (MSR_ECPT_START + ECPT_MAX_WAY)
     #define MSR_CWT_START                0x00004020
     #define MSR_CWT_END                  (MSR_CWT_START + CWT_MAX_WAY)
+
+    #define MSR_KERNEL_START              0x00004040
 #endif
 
 #define XSTATE_FP_BIT                   0
@@ -1477,6 +1479,8 @@ typedef struct CPUX86State {
     /* msr registers for ECPT and CWT*/
 	uint64_t ecpt_msr[ECPT_MAX_WAY];
     uint64_t cwt_msr[CWT_MAX_WAY];
+
+    uint64_t kernel_start;
 #endif
 
 	int32_t a20_mask;

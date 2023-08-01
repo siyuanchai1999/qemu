@@ -27,6 +27,8 @@
 #include "ECPT.h"
 
 #include "build/x86_64-softmmu-config-target.h"
+#include <assert.h>
+#include <stdint.h>
 
 #define QEMU_LOG_TRANSLATE(gdb, MASK, FMT, ...)   \
     do {                                                \
@@ -186,6 +188,82 @@ static inline hwaddr get_pte_addr(hwaddr entry_addr, ecpt_entry_t * entry_p, uin
     return entry_addr + (uint64_t) (((void *) pte_p) - ((void *) entry_p));
 }
 
+// static cwt_entry_t cwc_pud[CWC_PUD_SIZE] = {};
+// static cwt_entry_t cwc_pmd[CWC_PMD_SIZE] = {};
+
+static inline bool is_kernel_addr(CPUX86State *env, hwaddr addr) 
+{
+    return addr >= env->kernel_start;
+}
+
+static void fill_ways_range(int way_start, int way_end, int * possible_ways, int cur_pos, int * n_ways)
+{
+    int i;
+    for (i = way_start; i < way_end; i++) {
+        possible_ways[cur_pos] = i;
+        cur_pos++;
+    }
+    *n_ways = cur_pos;
+}
+
+static inline void fill_all_kernel_ways(int * possible_ways, int * n_ways)
+{
+    fill_ways_range(0, ECPT_KERNEL_WAY, possible_ways, 0, n_ways);
+}
+
+static inline void fill_all_user_ways(int * possible_ways, int * n_ways)
+{
+    fill_ways_range(ECPT_KERNEL_WAY, ECPT_TOTAL_WAY, possible_ways, 0, n_ways);
+}
+
+static inline void fill_all_ways(int * possible_ways, int * n_ways)
+{
+    fill_ways_range(0, ECPT_TOTAL_WAY, possible_ways, 0, n_ways);
+}
+
+
+static inline void fill_from_cwc(int * possible_ways, int * n_ways)
+{
+
+}
+/* consume addr and CWC to get which way in ECPT to query 
+    possible_ways will be filled. n_ways indicate its size.
+    start and end indicate the range of ways to be filled.
+*/
+static bool get_ECPT_ways(CPUX86State *env, hwaddr addr, int * possible_ways, int * n_ways)
+{
+    if (is_kernel_addr(env, addr)) {
+        
+        if (*n_ways == 0) {
+            fill_all_kernel_ways(possible_ways, n_ways);  
+            /* TODO fill from CWC */
+            // fill_from_cwc(possible_ways, n_ways);
+        } else if (*n_ways < ECPT_KERNEL_WAY) {
+            /* CWC fails to cover all ways*/
+            /* TODO: optimize this by only querying the remaining ways */
+            fill_all_kernel_ways(possible_ways, n_ways);  
+        } else {
+            /* cannot query more ways */
+            return false;                                                                                 
+        }
+    } else {
+        if (*n_ways == 0) {
+            /* TODO fill from CWC */
+            fill_all_user_ways(possible_ways, n_ways);
+        } else if (*n_ways < ECPT_USER_WAY) {
+            /* CWC fails to cover all ways*/
+            /* TODO: optimize this by only querying the remaining ways */
+            fill_all_user_ways(possible_ways, n_ways);  
+        } else {
+            /* shouldn't be here */
+            return false;   
+        }
+    }
+
+    return true;
+}
+
+
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
                          hwaddr *xlat, int *page_size, int *prot)
@@ -204,10 +282,10 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     /**
      * TODO: support more granularity
      */
-    enum Granularity gran = page_4KB;
+    
 
-    // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
-    //        addr, is_write1, mmu_idx);
+    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
+           addr, is_write1, mmu_idx);
 
     /**
      * TODO: 
@@ -223,46 +301,57 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      *      size of the page table obtained by 
      * 
      */
-    int w;
-    uint64_t vpn, size, hash, cr, pte = 0;
-    uint64_t rehash_ptr, rehash_way, rehash_cr, rehash_size, rehash_hash;
-    uint64_t * pte_pointer = NULL;
-    hwaddr entry_addr = 0, pte_addr = 0;
-	ecpt_entry_t * ecpt_base;
+    int w, idx = 0;
+    
+    /* These are results from accessing all translation ways */
+    uint64_t pte = 0;
+    hwaddr entry_found_addr = 0, pte_addr = 0;
+	int way_found = -1;
+    enum Granularity gran_found;
+
 	ecpt_entry_t entry;
 
+    int possible_ways[ECPT_TOTAL_WAY];
+    int n_ways = 0;
+    bool new_way_filled = false;
 
-	for (w = 0; w < ECPT_TOTAL_WAY; w++) 
+    get_ECPT_ways(env, addr, possible_ways, &n_ways);
+
+retry:
+
+    pte = 0;
+    entry_found_addr = 0; pte_addr = 0;
+    way_found = -1;
+    gran_found = page_4KB;
+    for (idx = 0; idx < n_ways; idx++) 
     {
-		rehash_ptr = 0;
-        rehash_way = 0;
-        rehash_cr = 0;
-        rehash_size = 0;
-        rehash_hash = 0;
+        uint64_t rehash_ptr = 0, rehash_way = 0, rehash_cr = 0, rehash_size = 0,
+                 rehash_hash = 0;
+        ecpt_entry_t * ecpt_base;
+        uint64_t vpn = 0, size = 0, hash = 0, cr = 0 ;
+        hwaddr entry_addr = 0;
+        enum Granularity gran = page_4KB;
 
-		/* go through all the ways to search for matching tag  */
-		/* In real hardware, this should be done in parallel */
-		if (w < ECPT_4K_WAY) {
+        w = possible_ways[idx];
+
+        /* go through all the ways to search for matching tag  */
+        /* In real hardware, this should be done in parallel */
+        if (w < ECPT_4K_WAY) {
             gran = page_4KB;
             vpn = VADDR_TO_PAGE_NUM_4KB(addr); 
-        } 
-        else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
+        } else if (w < ECPT_4K_WAY + ECPT_2M_WAY) {
             gran = page_2MB;
 			vpn = VADDR_TO_PAGE_NUM_2MB(addr);
-        } 
-        else if (w < ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY) {
+        } else if (w < ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY) {
             gran = page_1GB;
 			vpn = VADDR_TO_PAGE_NUM_1GB(addr);
-        } 
-        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY) {
+        } else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY) {
             gran = page_4KB;
             vpn = VADDR_TO_PAGE_NUM_4KB(addr);  
-        } 
-        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY) {
+        } else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY) {
             gran = page_2MB;
 			vpn = VADDR_TO_PAGE_NUM_2MB(addr);
-        } 
-        else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY + ECPT_1G_USER_WAY) {
+        } else if (w < ECPT_KERNEL_WAY + ECPT_4K_USER_WAY + ECPT_2M_USER_WAY + ECPT_1G_USER_WAY) {
             gran = page_1GB;
 			vpn = VADDR_TO_PAGE_NUM_1GB(addr);
         } else {
@@ -323,44 +412,73 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
         if (ecpt_entry_match_vpn(&entry, vpn)) {
             /* found */
+            uint64_t * pte_pointer = NULL;
+        
             if (gran == page_4KB) {
                 pte_pointer = pte_offset_from_ecpt_entry(&entry, addr);
-                *page_size = PAGE_SIZE_4KB;
             } else if (gran == page_2MB) {
                 pte_pointer = pmd_offset_from_ecpt_entry(&entry, addr);
-                *page_size = PAGE_SIZE_2MB;
             } else if (gran == page_1GB) {
                 pte_pointer = pud_offset_from_ecpt_entry(&entry, addr);
-                *page_size = PAGE_SIZE_1GB;
             } else {
                 assert(0);
             }
-            break;
-        } else {
-            /* not found move on */
+
+            /* either found pte or pte_pointer has to be empty */
+            if (!(ecpt_pte_is_empty(pte) || ecpt_pte_is_empty(*pte_pointer))) {
+                warn_report("Duplicated entry! addr=%lx way_found=%x entry_found_addr=%lx pte_addr=%lx "
+                            "pte=%lx *pte_pointer=%lx\n",
+                            addr, way_found, entry_found_addr, pte_addr, pte,
+                            *pte_pointer);
+                assert(0);
+            }
+
+            if (ecpt_pte_is_empty(pte)) {
+                /* we found a real matched entry */
+                pte = *pte_pointer;
+
+                if (gran == page_4KB) {
+                    *page_size = PAGE_SIZE_4KB;
+                } else if (gran == page_2MB) {
+                    *page_size = PAGE_SIZE_2MB;
+                } else if (gran == page_1GB) {
+                    *page_size = PAGE_SIZE_1GB;
+                } else {
+                    assert(0);
+                }
+
+                way_found = w;
+                entry_found_addr = entry_addr;
+                pte_addr = get_pte_addr(entry_addr, &entry, pte_pointer);
+                gran_found = gran;
+            }
+            
         }
 
 	}
 
-    
-    if (w < ECPT_TOTAL_WAY) {
-        /* If vpn is matched w must < ECPT_TOTAL_WAY  */
-        pte = *pte_pointer;
-        pte_addr = get_pte_addr(entry_addr, &entry, pte_pointer);
-        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx way=%d\n", 
-            entry_addr, pte_addr, pte, w);
+    if (entry_found_addr != 0) {
 
-        if (hash < rehash_ptr) {
-            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    ECPT Translate: Elastic load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx rehash_way=%ld\n",
-                entry_addr, pte_addr, pte, rehash_way);
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx way=%d\n", 
+            entry_found_addr, pte_addr, pte, way_found);
+
+        if (way_found >= ECPT_TOTAL_WAY) {
+            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    ECPT Translate: Elastic load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx rehash_way=%d\n",
+                entry_found_addr, pte_addr, pte, way_found);
         }
     } else {
-        /* This will lead to a page fault */
         pte = 0;
-        pte_pointer = NULL;
+        entry_found_addr = 0;
         pte_addr = 0;
+        way_found = -1;
+
+        /* Try to fix it with new ways */
+        new_way_filled = get_ECPT_ways(env, addr, possible_ways, &n_ways);
+        if (new_way_filled){
+            goto retry;
+        }
+        /* fall through This will lead to a page fault */
     }
-    
 
     uint64_t ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
     ptep &= pte;
@@ -454,10 +572,10 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
 
     /* align to page_size */
     // pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
-    if (gran == page_4KB) {
+    if (gran_found == page_4KB) {
         page_offset = ADDR_TO_OFFSET_4KB(addr);
         
-    } else if (gran == page_2MB) {
+    } else if (gran_found == page_2MB) {
         page_offset = ADDR_TO_OFFSET_2MB(addr);
         if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
             goto do_fault_rsvd;
@@ -466,7 +584,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     } else {
         /* gran == page_1GB */
         page_offset = ADDR_TO_OFFSET_1GB(addr);
-        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
+        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_1GB(pte)) {
             goto do_fault_rsvd;
         }
     }

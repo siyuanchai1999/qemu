@@ -2,6 +2,7 @@
 #define ECPT_H
 
 #include "qemu/osdep.h"
+#include <stdint.h>
 
 // #define PAGE_HEADER_MASK (0xffff000000000000)
 // #define PAGE_TAIL_MASK_4KB (0xfff)
@@ -204,6 +205,14 @@ typedef struct ecpt_entry{
     uint64_t pte[ECPT_CLUSTER_FACTOR];
 } ecpt_entry_t;
 
+static inline int ecpt_pte_is_empty(uint64_t pte) {
+#ifdef PTE_VPN_MASK
+	return (pte & ~(PTE_VPN_MASK))  == 0;
+#else
+	return (pte.pte & ~(_PAGE_KNL_ERRATUM_MASK))  == 0;
+#endif
+}
+
 static inline unsigned long ecpt_pte_index(uint64_t addr) 
 {
 	return (addr >> PAGE_SHIFT_4KB) & (ECPT_CLUSTER_FACTOR - 1);
@@ -299,5 +308,28 @@ uint32_t find_rehash_way(uint32_t way);
 #if CWT_MAX_WAY < CWT_TOTAL_N_WAY
 #error "CWT_MAX_WAY exceeded"
 #endif
+
+#define CWT_N_SECTION_HEADERS 64
+typedef union cwt_header_byte
+{
+    struct  {
+        /* header info */
+        unsigned int present_1GB : 1;
+        unsigned int present_2MB : 1;
+        unsigned int present_4KB : 1;
+        unsigned int way_in_ecpt : 2;
+
+        /* bits for partial info */
+        unsigned int partial_vpn : 3;
+    } __attribute__((packed));
+    unsigned char byte;
+} cwt_header_t;
+
+typedef struct cwt_entry {
+	cwt_header_t sec_headers[CWT_N_SECTION_HEADERS];
+} __attribute__((packed)) cwt_entry_t;
+
+#define CWC_PUD_SIZE 2
+#define CWC_PMD_SIZE 16
 
 #endif /* ECPT_H */

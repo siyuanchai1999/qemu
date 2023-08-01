@@ -318,7 +318,7 @@ void helper_wrmsr(CPUX86State *env)
             uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_ECPT_START;
             env->ecpt_msr[offset] = val;
             qemu_log_mask(CPU_LOG_MMU,
-                            "ecpt_msr[%d]=%lx\n", offset, env->ecpt_msr[offset]);
+                            "write ecpt_msr[%d]=%lx\n", offset, env->ecpt_msr[offset]);
             break;
         }
 
@@ -326,7 +326,14 @@ void helper_wrmsr(CPUX86State *env)
             uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_CWT_START;
             env->cwt_msr[offset] = val;
             qemu_log_mask(CPU_LOG_MMU,
-                            "cwt_msr[%d]=%lx\n", offset, env->cwt_msr[offset]);
+                            "write cwt_msr[%d]=%lx\n", offset, env->cwt_msr[offset]);
+            break;
+        }
+
+        if ((uint32_t)env->regs[R_ECX] == MSR_KERNEL_START) {
+            env->kernel_start = val;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "write kernel_start=%lx\n", env->kernel_start);
             break;
         }
 #endif
@@ -507,6 +514,13 @@ void helper_rdmsr(CPUX86State *env)
             val = env->cwt_msr[offset];
             qemu_log_mask(CPU_LOG_MMU,
                             "read cwt_msr[%d]=%lx\n", offset, val);
+            break;
+        }
+
+        if ((uint32_t)env->regs[R_ECX] == MSR_KERNEL_START) {
+            val = env->kernel_start;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "read kernel_start=%lx\n", val);
             break;
         }
 #endif
