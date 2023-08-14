@@ -697,6 +697,11 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     is_write = is_write1 & 1;
     a20_mask = x86_get_a20_mask(env);
 
+
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "Radix Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n", addr, is_write1, mmu_idx);
+#endif
+
     if (!(pg_mode & PG_MODE_NXE)) {
         rsvd_mask |= PG_NX_MASK;
     }
@@ -724,6 +729,10 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
                 pml5e_addr = ((cr3 & ~0xfff) +
                         (((addr >> 48) & 0x1ff) << 3)) & a20_mask;
                 pml5e_addr = GET_HPHYS(cs, pml5e_addr, MMU_DATA_STORE, NULL);
+
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+                QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PML5E: addr=%" VADDR_PRIx "\n", pml5e_addr);
+#endif
                 pml5e = x86_ldq_phys(cs, pml5e_addr);
                 if (!(pml5e & PG_PRESENT_MASK)) {
                     goto do_fault;
@@ -744,6 +753,10 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             pml4e_addr = ((pml5e & PG_ADDRESS_MASK) +
                     (((addr >> 39) & 0x1ff) << 3)) & a20_mask;
             pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, NULL);
+
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PML4E: addr=%" VADDR_PRIx "\n", pml4e_addr);
+#endif
             pml4e = x86_ldq_phys(cs, pml4e_addr);
             if (!(pml4e & PG_PRESENT_MASK)) {
                 goto do_fault;
@@ -796,10 +809,18 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
         }
 
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PDPE: addr=%" VADDR_PRIx "\n", pdpe_addr);
+#endif
         pde_addr = ((pdpe & PG_ADDRESS_MASK) + (((addr >> 21) & 0x1ff) << 3)) &
             a20_mask;
         pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, NULL);
+
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PDE: addr=%" VADDR_PRIx "\n", pde_addr);
+#endif
         pde = x86_ldq_phys(cs, pde_addr);
+
         if (!(pde & PG_PRESENT_MASK)) {
             goto do_fault;
         }
@@ -822,6 +843,9 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         pte_addr = ((pde & PG_ADDRESS_MASK) + (((addr >> 12) & 0x1ff) << 3)) &
             a20_mask;
         pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PTE: addr=%" VADDR_PRIx "\n", pdpe_addr);
+#endif
         pte = x86_ldq_phys(cs, pte_addr);
         if (!(pte & PG_PRESENT_MASK)) {
             goto do_fault;
