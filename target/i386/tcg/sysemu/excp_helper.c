@@ -263,6 +263,78 @@ static bool get_ECPT_ways(CPUX86State *env, hwaddr addr, int * possible_ways, in
     return true;
 }
 
+static uint64_t * entry_to_pte_pointer(ecpt_entry_t * entry, hwaddr addr, enum Granularity gran) {
+    uint64_t * pte_pointer = NULL;
+    
+    if (gran == page_4KB) {
+        pte_pointer = pte_offset_from_ecpt_entry(entry, addr);
+    } else if (gran == page_2MB) {
+        pte_pointer = pmd_offset_from_ecpt_entry(entry, addr);
+    } else if (gran == page_1GB) {
+        pte_pointer = pud_offset_from_ecpt_entry(entry, addr);
+    } else {
+        assert(0);
+    }
+    return pte_pointer;
+}
+
+static int get_paddr_from_pte(uint64_t pte, hwaddr vaddr, enum Granularity gran, hwaddr * paddr) {
+    uint64_t page_offset = 0;
+
+    if (gran == page_4KB) {
+        page_offset = ADDR_TO_OFFSET_4KB(vaddr);
+        
+    } else if (gran == page_2MB) {
+        page_offset = ADDR_TO_OFFSET_2MB(vaddr);
+        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_2MB(pte)) {
+            warn_report("PTE wrong format pte=%lx\n", pte);
+            return -1;
+        }
+
+    } else {
+        /* gran == page_1GB */
+        page_offset = ADDR_TO_OFFSET_1GB(vaddr);
+        if (PTE_TO_PADDR(pte) != PTE_TO_PADDR_1GB(pte)) {
+            warn_report("PTE wrong format pte=%lx\n", pte);
+            return -1;
+        }
+    }
+    
+    *paddr = PTE_TO_PADDR(pte);
+    *paddr += page_offset;
+
+    return 0;
+}
+
+static bool duplicated_pte_tolerable(hwaddr vaddr, uint64_t old_pte,
+                                     enum Granularity old_gran,
+                                     uint64_t new_pte,
+                                     enum Granularity new_gran) {
+    hwaddr old_paddr = 0, new_paddr = 0;
+    int res = 0;
+
+    /* no duplication at all. unlikely this is true */
+    if (ecpt_pte_is_empty(old_pte) || ecpt_pte_is_empty(new_pte)) {
+        return true;
+    }
+
+    res = get_paddr_from_pte(old_pte, vaddr, old_gran, &old_paddr);
+    if (res) {
+        return false;
+    }
+
+    res = get_paddr_from_pte(new_pte, vaddr, new_gran, &new_paddr);
+    if (res) {
+        return false;
+    }
+
+    /* not tolerable if addr is different */
+    if (old_paddr != new_paddr) {
+        return false;
+    }
+
+    return true;
+}
 
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
@@ -279,6 +351,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     uint32_t page_offset;
     uint32_t pkr;
     hwaddr paddr;
+    bool tolerable = false;
     /**
      * TODO: support more granularity
      */
@@ -412,28 +485,34 @@ retry:
 
         if (ecpt_entry_match_vpn(&entry, vpn)) {
             /* found */
-            uint64_t * pte_pointer = NULL;
-        
-            if (gran == page_4KB) {
-                pte_pointer = pte_offset_from_ecpt_entry(&entry, addr);
-            } else if (gran == page_2MB) {
-                pte_pointer = pmd_offset_from_ecpt_entry(&entry, addr);
-            } else if (gran == page_1GB) {
-                pte_pointer = pud_offset_from_ecpt_entry(&entry, addr);
-            } else {
-                assert(0);
-            }
+            uint64_t * pte_pointer = entry_to_pte_pointer(&entry, addr, gran);
+            
+            if (!ecpt_pte_is_empty(*pte_pointer)) {
+                /* either found pte or pte_pointer has to be empty */
+                if (!(ecpt_pte_is_empty(pte))) {
+                    tolerable = duplicated_pte_tolerable(addr, pte, gran_found, *pte_pointer, gran);
+                    warn_report("Duplicated entry! addr=%lx way_found=%x entry_found_addr=%lx pte_addr=%lx pte=%lx"
+                                " *pte_pointer=%lx cur_way=%x cur_entry_addr=%lx tolerable=%d\n",
+                                addr, way_found, entry_found_addr, pte_addr, pte,
+                                *pte_pointer, w, entry_addr, tolerable);
+                    
+                    
 
-            /* either found pte or pte_pointer has to be empty */
-            if (!(ecpt_pte_is_empty(pte) || ecpt_pte_is_empty(*pte_pointer))) {
-                warn_report("Duplicated entry! addr=%lx way_found=%x entry_found_addr=%lx pte_addr=%lx "
-                            "pte=%lx *pte_pointer=%lx\n",
-                            addr, way_found, entry_found_addr, pte_addr, pte,
-                            *pte_pointer);
-                assert(0);
-            }
+                    if (!tolerable) {
+                        assert(0);
+                    }
 
-            if (ecpt_pte_is_empty(pte)) {
+                    /* if tolerable  */
+                    if (gran > gran_found) {
+                        /* if the new entry has larger granularity, we use it to resolve duplication*/
+                        /* fall through */
+                    } else {
+                        /* if the new entry has larger granularity, we don't pick it */
+                        continue;
+                    }
+                }
+
+                /* assign current  */
                 /* we found a real matched entry */
                 pte = *pte_pointer;
 
@@ -452,7 +531,6 @@ retry:
                 pte_addr = get_pte_addr(entry_addr, &entry, pte_pointer);
                 gran_found = gran;
             }
-            
         }
 
 	}
