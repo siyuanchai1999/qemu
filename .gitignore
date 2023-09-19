@@ -18,3 +18,4 @@ GTAGS
 /.vscode/*
 /hash_res/*
 .cache/*
+configs/targets/x86_64-softmmu.mak
