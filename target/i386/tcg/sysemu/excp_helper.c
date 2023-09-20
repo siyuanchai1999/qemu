@@ -27,6 +27,7 @@
 #include "ECPT.h"
 
 #include "build/x86_64-softmmu-config-target.h"
+#include <stdint.h>
 
 #define QEMU_LOG_TRANSLATE(gdb, MASK, FMT, ...)   \
     do {                                                \
@@ -70,11 +71,11 @@ int get_pg_mode(CPUX86State *env)
 
 #define PG_ERROR_OK (-1)
 
-typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
+typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType access_type, int size,
 				int *prot);
 
-#define GET_HPHYS(cs, gpa, access_type, prot)  \
-	(get_hphys_func ? get_hphys_func(cs, gpa, access_type, prot) : gpa)
+#define GET_HPHYS(cs, gpa, access_type, size, prot)  \
+	(get_hphys_func ? get_hphys_func(cs, gpa, access_type, size, prot) : gpa)
 
 #ifdef TARGET_X86_64_ECPT
 
@@ -187,7 +188,7 @@ static inline hwaddr get_pte_addr(hwaddr entry_addr, ecpt_entry_t * entry_p, uin
 }
 
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
-                         int is_write1, int mmu_idx, int pg_mode, int gdb,
+                         int is_write1, int mmu_idx, int pg_mode, int gdb, int size,
                          hwaddr *xlat, int *page_size, int *prot)
 {
     X86CPU *cpu = X86_CPU(cs);
@@ -315,7 +316,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
         QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx base at 0x%016lx\n", entry_addr, (uint64_t) ecpt_base);
 
          /* do nothing for now, cuz nested paging is not enabled */
-        entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
+        entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, size, NULL);
         
         load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
         
@@ -474,7 +475,7 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     paddr = PTE_TO_PADDR(pte);
     paddr += page_offset;
     // pte = pte & PG_ADDRESS_MASK;
-    *xlat = GET_HPHYS(cs, paddr, is_write1, prot);
+    *xlat = GET_HPHYS(cs, paddr, is_write1, size, prot);
     return PG_ERROR_OK;
 
  do_fault_rsvd:
@@ -535,7 +536,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */
                             + (hash << 3);           /*  offset; */
 	// QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx\n", pte_addr);
-    pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+    pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, size, NULL);
     uint64_t pte = x86_ldq_phys(cs, pte_addr);
 
 
@@ -642,7 +643,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
 
     paddr = PTE_TO_PADDR(pte);
     paddr += page_offset;
-    *xlat = GET_HPHYS(cs, paddr, is_write1, prot);
+    *xlat = GET_HPHYS(cs, paddr, is_write1, size, prot);
     return PG_ERROR_OK;
 
  do_fault_rsvd:
@@ -661,7 +662,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
 }
 
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
-                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb, int size,
                          hwaddr *xlat, int *page_size, int *prot) {
 
     // X86CPU *cpu = X86_CPU(cs);
@@ -671,7 +672,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     int after_transition = !!(cr3 & CR3_TRANSITION_BIT);
 
     if (after_transition) {
-        return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
+        return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, gdb, size, lat, page_size, prot);
     } else {
         return mmu_translate_2M_basic(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
     }
@@ -680,21 +681,27 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 #else
 
 #define RADIX_LEVEL 4
-
 struct radix_trans_info {
     uint64_t vaddr;
     uint64_t PTEs[RADIX_LEVEL];
     uint64_t paddr;
     uint64_t page_size;
+    MMUAccessType access_type;
+    uint32_t access_size;
+    uint64_t pc;
 };
 
-static void print_radix_info(struct radix_trans_info * info) {
-    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx page_size=%lx\n", 
-        info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2], info->PTEs[3], info->paddr, info->page_size);
+static void print_radix_info(struct radix_trans_info *info) {
+    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU,
+                       "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
+                       "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx\n",
+                       info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2],
+                       info->PTEs[3], info->paddr, info->page_size,
+                       info->access_type, info->access_size, info->pc);
 }
 
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
-                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb,
+                         uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb, int size,
                          hwaddr *xlat, int *page_size, int *prot)
 {
     X86CPU *cpu = X86_CPU(cs);
@@ -717,6 +724,9 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     struct radix_trans_info walk_info;
     memset(&walk_info, 0, sizeof(struct radix_trans_info));
     walk_info.vaddr = addr;
+    walk_info.access_type = is_write1;
+    walk_info.access_size = size;
+    walk_info.pc = env->eip;
     // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "Radix Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n", addr, is_write1, mmu_idx);
 #endif
 
@@ -746,7 +756,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             if (la57) {
                 pml5e_addr = ((cr3 & ~0xfff) +
                         (((addr >> 48) & 0x1ff) << 3)) & a20_mask;
-                pml5e_addr = GET_HPHYS(cs, pml5e_addr, MMU_DATA_STORE, NULL);
+                pml5e_addr = GET_HPHYS(cs, pml5e_addr, MMU_DATA_STORE, size, NULL);
 
 // #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
 //                 // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PML5E: addr=%" VADDR_PRIx "\n", pml5e_addr);
@@ -770,7 +780,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 
             pml4e_addr = ((pml5e & PG_ADDRESS_MASK) +
                     (((addr >> 39) & 0x1ff) << 3)) & a20_mask;
-            pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, NULL);
+            pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, size, NULL);
 
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
             walk_info.PTEs[0] = pml4e_addr;
@@ -790,7 +800,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             ptep &= pml4e ^ PG_NX_MASK;
             pdpe_addr = ((pml4e & PG_ADDRESS_MASK) + (((addr >> 30) & 0x1ff) << 3)) &
                 a20_mask;
-            pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, NULL);
+            pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, size, NULL);
             pdpe = x86_ldq_phys(cs, pdpe_addr);
             if (!(pdpe & PG_PRESENT_MASK)) {
                 goto do_fault;
@@ -816,7 +826,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             /* XXX: load them when cr3 is loaded ? */
             pdpe_addr = ((cr3 & ~0x1f) + ((addr >> 27) & 0x18)) &
                 a20_mask;
-            pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, NULL);
+            pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, size, NULL);
             pdpe = x86_ldq_phys(cs, pdpe_addr);
             if (!(pdpe & PG_PRESENT_MASK)) {
                 goto do_fault;
@@ -834,7 +844,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 #endif
         pde_addr = ((pdpe & PG_ADDRESS_MASK) + (((addr >> 21) & 0x1ff) << 3)) &
             a20_mask;
-        pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, NULL);
+        pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, size, NULL);
 
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
         walk_info.PTEs[2] = pde_addr;
@@ -863,7 +873,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         }
         pte_addr = ((pde & PG_ADDRESS_MASK) + (((addr >> 12) & 0x1ff) << 3)) &
             a20_mask;
-        pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+        pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, size, NULL);
         
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
         walk_info.PTEs[3] = pte_addr;
@@ -895,7 +905,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         /* page directory entry */
         pde_addr = ((cr3 & ~0xfff) + ((addr >> 20) & 0xffc)) &
             a20_mask;
-        pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, NULL);
+        pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, size, NULL);
         pde = x86_ldl_phys(cs, pde_addr);
         if (!(pde & PG_PRESENT_MASK)) {
             goto do_fault;
@@ -923,7 +933,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         /* page directory entry */
         pte_addr = ((pde & ~0xfff) + ((addr >> 10) & 0xffc)) &
             a20_mask;
-        pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+        pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, size, NULL);
         pte = x86_ldl_phys(cs, pte_addr);
         if (!(pte & PG_PRESENT_MASK)) {
             goto do_fault;
@@ -1013,7 +1023,7 @@ do_check_protect_pse36:
     /* align to page_size */
     pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     page_offset = addr & (*page_size - 1);
-    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
+    *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, size, prot);
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
     walk_info.page_size = *page_size;
@@ -1042,7 +1052,7 @@ do_check_protect_pse36:
 }
 #endif
 
-hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
+hwaddr get_hphys_with_size(CPUState *cs, hwaddr gphys, MMUAccessType access_type, int size,
                         int *prot)
 {
     CPUX86State *env = &X86_CPU(cs)->env;
@@ -1061,7 +1071,7 @@ hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
     }
 
     exit_info_1 = mmu_translate(cs, gphys, NULL, env->nested_cr3, 
-                               access_type, MMU_USER_IDX, env->nested_pg_mode, 0 /* gdb */, 
+                               access_type, MMU_USER_IDX, env->nested_pg_mode, 0 /* gdb */, size,
                                &hphys, &page_size, &next_prot);
     if (exit_info_1 == PG_ERROR_OK) {
         if (prot) {
@@ -1079,6 +1089,13 @@ hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
     }
     cpu_vmexit(env, SVM_EXIT_NPF, exit_info_1, env->retaddr);
 }
+
+hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
+                        int *prot)
+{
+    return get_hphys_with_size(cs, gphys, access_type, 0, prot);
+}
+
 
 /* return value:
  * -1 = cannot handle fault
@@ -1099,8 +1116,8 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
     printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
            addr, is_write1, mmu_idx, env->eip);
 #endif
-    qemu_log_mask(CPU_LOG_MMU, "MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
-           addr, is_write1, mmu_idx, env->eip);
+    qemu_log_mask(CPU_LOG_MMU, "MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx " size=%d\n",
+           addr, is_write1, mmu_idx, env->eip, size);
     // printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
         //    addr, is_write1, mmu_idx, env->eip);
 
@@ -1116,8 +1133,8 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         page_size = 4096;
     } else {
         pg_mode = get_pg_mode(env);
-        error_code = mmu_translate(cs, addr, get_hphys, env->cr[3], is_write1,
-                                   mmu_idx, pg_mode, 0 /* gdb */, 
+        error_code = mmu_translate(cs, addr, get_hphys_with_size, env->cr[3], is_write1,
+                                   mmu_idx, pg_mode, 0 /* gdb */, size,
                                    &paddr, &page_size, &prot);
         qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x err=%x\n",
            paddr, page_size, prot, error_code);
@@ -1132,8 +1149,9 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         paddr &= TARGET_PAGE_MASK;
 
         assert(prot & (1 << is_write1));
+
         tlb_set_page_with_attrs(cs, vaddr, paddr, cpu_get_mem_attrs(env),
-                                prot, mmu_idx, page_size);
+                            prot, mmu_idx, page_size);
         return 0;
     } else {
         if (env->intercept_exceptions & (1 << EXCP0E_PAGE)) {
@@ -1170,5 +1188,6 @@ bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
 int mmu_translate_wrapper(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode,
                          hwaddr *xlat, int *page_size, int *prot) {
-    return mmu_translate(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, 1 /* gdb */, xlat, page_size, prot);
+    /* function for gdb probe */
+    return mmu_translate(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, 1 /* gdb */, 0,  xlat, page_size, prot);
 }

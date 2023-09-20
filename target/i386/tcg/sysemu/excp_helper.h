@@ -4,7 +4,7 @@
 #include "cpu.h"
 
 // Note: this typedef has a duplication in excp_helper.c
-typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType access_type, int *prot);
+typedef hwaddr (*MMUTranslateFunc)(CPUState *cs, hwaddr gphys, MMUAccessType access_type, int size, int *prot);
 
 // also duplicated
 #define PG_ERROR_OK (-1)

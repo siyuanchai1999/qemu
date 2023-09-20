@@ -246,7 +246,7 @@ hwaddr x86_cpu_get_phys_page_attrs_debug(CPUState *cs, vaddr addr,
         error_code = mmu_translate_wrapper(
             cs,
             addr,
-            get_hphys,  // take care of the usage; should be ok
+            get_hphys_with_size,  // take care of the usage; should be ok
             env->cr[3],
             0,  // is_write1; fasle/read_only
             attrs->user ? MMU_USER_IDX : MMU_KSMAP_IDX,  // mmu_idx

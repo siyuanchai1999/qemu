@@ -2303,6 +2303,9 @@ static inline bool ctl_has_irq(CPUX86State *env)
 
 hwaddr get_hphys(CPUState *cs, hwaddr gphys, MMUAccessType access_type,
                         int *prot);
+
+hwaddr get_hphys_with_size(CPUState *cs, hwaddr gphys, MMUAccessType access_type, int size,
+                        int *prot);
 #if defined(TARGET_X86_64) && \
     defined(CONFIG_USER_ONLY) && \
     defined(CONFIG_LINUX)
