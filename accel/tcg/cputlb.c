@@ -1779,11 +1779,19 @@ static void *atomic_mmu_lookup(CPUArchState *env, target_ulong addr,
         goto stop_the_world;
     }
 
+#ifndef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
     index = tlb_index(env, mmu_idx, addr);
     tlbe = tlb_entry(env, mmu_idx, addr);
-
+#endif
     /* Check TLB entry and enforce page permissions.  */
     if (prot & PAGE_WRITE) {
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+        tlb_fill(env_cpu(env), addr, size,
+                         MMU_DATA_STORE, mmu_idx, retaddr);
+        index = tlb_index(env, mmu_idx, addr);
+        tlbe = tlb_entry(env, mmu_idx, addr);
+#endif
+
         tlb_addr = tlb_addr_write(tlbe);
         if (!tlb_hit(tlb_addr, addr)) {
             if (!VICTIM_TLB_HIT(addr_write, addr)) {
@@ -1808,6 +1816,12 @@ static void *atomic_mmu_lookup(CPUArchState *env, target_ulong addr,
             goto stop_the_world;
         }
     } else /* if (prot & PAGE_READ) */ {
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+        tlb_fill(env_cpu(env), addr, size,
+                         MMU_DATA_STORE, mmu_idx, retaddr);
+        index = tlb_index(env, mmu_idx, addr);
+        tlbe = tlb_entry(env, mmu_idx, addr);
+#endif
         tlb_addr = tlbe->addr_read;
         if (!tlb_hit(tlb_addr, addr)) {
             if (!VICTIM_TLB_HIT(addr_write, addr)) {
@@ -1881,17 +1895,23 @@ load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
             FullLoadHelper *full_load)
 {
     uintptr_t mmu_idx = get_mmuidx(oi);
+    const MMUAccessType access_type =
+        code_read ? MMU_INST_FETCH : MMU_DATA_LOAD;
+    size_t size = memop_size(op);
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+    /* pull tlb_fill ahead of TLB hit checks, bypassing QEMU TLB, every memory reference goes through the page walk */
+    tlb_fill(env_cpu(env), addr, size,
+                     access_type, mmu_idx, retaddr);
+#endif
+
     uintptr_t index = tlb_index(env, mmu_idx, addr);
     CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
     target_ulong tlb_addr = code_read ? entry->addr_code : entry->addr_read;
     const size_t tlb_off = code_read ?
         offsetof(CPUTLBEntry, addr_code) : offsetof(CPUTLBEntry, addr_read);
-    const MMUAccessType access_type =
-        code_read ? MMU_INST_FETCH : MMU_DATA_LOAD;
     unsigned a_bits = get_alignment_bits(get_memop(oi));
     void *haddr;
     uint64_t res;
-    size_t size = memop_size(op);
 
     /* Handle CPU specific unaligned behaviour */
     if (addr & ((1 << a_bits) - 1)) {
@@ -2350,8 +2370,13 @@ store_helper_unaligned(CPUArchState *env, target_ulong addr, uint64_t val,
      * is already guaranteed to be filled, and that the second page
      * cannot evict the first.
      */
+
     page2 = (addr + size) & TARGET_PAGE_MASK;
     size2 = (addr + size) & ~TARGET_PAGE_MASK;
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+    tlb_fill(env_cpu(env), page2, size2, MMU_DATA_STORE,
+                     mmu_idx, retaddr);
+#endif
     index2 = tlb_index(env, mmu_idx, page2);
     entry2 = tlb_entry(env, mmu_idx, page2);
 
@@ -2411,13 +2436,19 @@ store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
              TCGMemOpIdx oi, uintptr_t retaddr, MemOp op)
 {
     uintptr_t mmu_idx = get_mmuidx(oi);
+    size_t size = memop_size(op);
+#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+    tlb_fill(env_cpu(env), addr, size, MMU_DATA_STORE,
+                     mmu_idx, retaddr);
+#endif
+
     uintptr_t index = tlb_index(env, mmu_idx, addr);
     CPUTLBEntry *entry = tlb_entry(env, mmu_idx, addr);
     target_ulong tlb_addr = tlb_addr_write(entry);
     const size_t tlb_off = offsetof(CPUTLBEntry, addr_write);
     unsigned a_bits = get_alignment_bits(get_memop(oi));
     void *haddr;
-    size_t size = memop_size(op);
+    
 
     /* Handle CPU specific unaligned behaviour */
     if (addr & ((1 << a_bits) - 1)) {

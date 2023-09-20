@@ -692,12 +692,15 @@ struct radix_trans_info {
 };
 
 static void print_radix_info(struct radix_trans_info *info) {
-    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU,
-                       "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
-                       "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx\n",
-                       info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2],
-                       info->PTEs[3], info->paddr, info->page_size,
-                       info->access_type, info->access_size, info->pc);
+    if (info->access_size > 0) {
+        QEMU_LOG_TRANSLATE(
+            0, CPU_LOG_MMU,
+            "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
+            "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx\n",
+            info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2],
+            info->PTEs[3], info->paddr, info->page_size, info->access_type,
+            info->access_size, info->pc);
+    }
 }
 
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,

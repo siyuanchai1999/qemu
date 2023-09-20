@@ -390,8 +390,6 @@ out:
 #endif
     pte &= PG_ADDRESS_MASK & ~(page_size - 1);
     page_offset = (addr & TARGET_PAGE_MASK) & (page_size - 1);
-    qemu_log_mask(CPU_LOG_MMU, "eric pte %lu\n", pte);
-    qemu_log_mask(CPU_LOG_MMU, "eric page offset %u\n", page_offset);
     return pte | page_offset;
 }
 #endif
