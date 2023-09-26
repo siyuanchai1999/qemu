@@ -689,6 +689,7 @@ struct radix_trans_info {
     MMUAccessType access_type;
     uint32_t access_size;
     uint64_t pc;
+    int ret_code;
 };
 
 static void print_radix_info(struct radix_trans_info *info) {
@@ -696,10 +697,10 @@ static void print_radix_info(struct radix_trans_info *info) {
         QEMU_LOG_TRANSLATE(
             0, CPU_LOG_MMU,
             "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
-            "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx\n",
+            "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx success=%d\n",
             info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2],
             info->PTEs[3], info->paddr, info->page_size, info->access_type,
-            info->access_size, info->pc);
+            info->access_size, info->pc, info->ret_code == PG_ERROR_OK);
     }
 }
 
@@ -1030,6 +1031,7 @@ do_check_protect_pse36:
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
     walk_info.page_size = *page_size;
+    walk_info.ret_code = PG_ERROR_OK;
     print_radix_info(&walk_info);
 #endif
     return PG_ERROR_OK;
@@ -1049,6 +1051,7 @@ do_check_protect_pse36:
 
 #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
+    walk_info.ret_code = error_code;
     print_radix_info(&walk_info);
 #endif
     return error_code;
