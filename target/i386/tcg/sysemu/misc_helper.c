@@ -85,8 +85,8 @@ target_ulong helper_read_crN(CPUX86State *env, int reg)
 
 void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
 {
-	qemu_log_mask(CPU_LOG_MMU,
-                        "reg=%d t0=%lx\n", reg, t0);
+	// qemu_log_mask(CPU_LOG_MMU,
+    //                     "reg=%d t0=%lx\n", reg, t0);
     switch (reg) {
     case 0:
         /*
@@ -156,10 +156,13 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         env->cr[reg] = t0;
         break;
     }
-    if (reg == 3 || reg > ECPT_TOTAL_WAY) {
-        for (uint16_t i = 0; i < ECPT_MAX_WAY; i++) {
-            qemu_log_mask(CPU_LOG_MMU,
-                            "cr[%d]=%lx\n", i, env->cr[i]);
+
+    if (env->msr_dump_trans) {
+        if (reg == 3 || reg > ECPT_TOTAL_WAY) {
+            for (uint16_t i = 0; i < ECPT_MAX_WAY; i++) {
+                    qemu_log_mask(CPU_LOG_MMU,
+                                "cr[%d]=%lx\n", i, env->cr[i]);
+            }
         }
     }
 }
@@ -316,6 +319,14 @@ void helper_wrmsr(CPUX86State *env)
         env->msr_bndcfgs = val;
         cpu_sync_bndcs_hflags(env);
         break;
+
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    case MSR_DUMP_TRANS_ADDR:
+        env->msr_dump_trans = val;
+        qemu_log_mask(CPU_LOG_MMU, "env->msr_dump_trans =%lx\n", env->msr_dump_trans);
+        break;
+#endif
+
     default:
 
 #ifdef TARGET_X86_64_ECPT
@@ -496,6 +507,13 @@ void helper_rdmsr(CPUX86State *env)
      case MSR_IA32_UCODE_REV:
         val = x86_cpu->ucode_rev;
         break;
+
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    case MSR_DUMP_TRANS_ADDR:
+        val = env->msr_dump_trans;
+        break;
+#endif
+
     default:
 
 #ifdef TARGET_X86_64_ECPT

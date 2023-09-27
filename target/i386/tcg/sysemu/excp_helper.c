@@ -692,8 +692,8 @@ struct radix_trans_info {
     int ret_code;
 };
 
-static void print_radix_info(struct radix_trans_info *info) {
-    if (info->access_size > 0) {
+static void print_radix_info(CPUX86State *env, struct radix_trans_info *info) {
+    if (info->access_size > 0 && env->msr_dump_trans) {
         QEMU_LOG_TRANSLATE(
             0, CPU_LOG_MMU,
             "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
@@ -731,7 +731,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     walk_info.access_type = is_write1;
     walk_info.access_size = size;
     walk_info.pc = env->eip;
-    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "tid=%x cpu->tid=%x\n", cs->thread_id , cpu->thread_id);
+    // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "tid=%x cpu->tid=%x\n", cs->thread_id , cpu->thread_id);
 #endif
 
     if (!(pg_mode & PG_MODE_NXE)) {
@@ -881,7 +881,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
         
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
         walk_info.PTEs[3] = pte_addr;
-        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PTE: addr=%" VADDR_PRIx "\n", pdpe_addr);
+        // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PTE: addr=%" VADDR_PRIx "\n", pdpe_addr);
 #endif
         pte = x86_ldq_phys(cs, pte_addr);
 
@@ -1032,7 +1032,7 @@ do_check_protect_pse36:
     walk_info.paddr = *xlat;
     walk_info.page_size = *page_size;
     walk_info.ret_code = PG_ERROR_OK;
-    print_radix_info(&walk_info);
+    print_radix_info(env, &walk_info);
 #endif
     return PG_ERROR_OK;
 
@@ -1052,7 +1052,7 @@ do_check_protect_pse36:
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
     walk_info.ret_code = error_code;
-    print_radix_info(&walk_info);
+    print_radix_info(env, &walk_info);
 #endif
     return error_code;
 }
@@ -1122,8 +1122,8 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
     printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
            addr, is_write1, mmu_idx, env->eip);
 #endif
-    qemu_log_mask(CPU_LOG_MMU, "MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx " size=%d\n",
-           addr, is_write1, mmu_idx, env->eip, size);
+    // qemu_log_mask(CPU_LOG_MMU, "MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx " size=%d\n",
+        //    addr, is_write1, mmu_idx, env->eip, size);
     // printf("MMU fault: addr=%" VADDR_PRIx " w=%d mmu=%d eip=" TARGET_FMT_lx "\n",
         //    addr, is_write1, mmu_idx, env->eip);
 
@@ -1142,8 +1142,8 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         error_code = mmu_translate(cs, addr, get_hphys_with_size, env->cr[3], is_write1,
                                    mmu_idx, pg_mode, 0 /* gdb */, size,
                                    &paddr, &page_size, &prot);
-        qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x err=%x\n",
-           paddr, page_size, prot, error_code);
+        // qemu_log_mask(CPU_LOG_MMU, "Translation Result: paddr=%" VADDR_PRIx " page_size=0x%x prot=0x%x err=%x\n",
+        //    paddr, page_size, prot, error_code);
         // printf("Translation Result: paddr=%" VADDR_PRIx " page_size=%d prot=0x%x\n",
         //    paddr, page_size, prot);
     }

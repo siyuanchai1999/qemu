@@ -27,6 +27,7 @@
 #include "qapi/qapi-types-common.h"
 
 #include "build/x86_64-softmmu-config-target.h"
+#include <stdint.h>
 
 #ifdef TARGET_X86_64_ECPT
     #include "tcg/sysemu/ECPT.h"
@@ -541,6 +542,11 @@ typedef enum X86Seg {
     #define MSR_CWT_START                0x00004020
     #define MSR_CWT_END                  (MSR_CWT_START + CWT_MAX_WAY)
 #endif
+
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    #define MSR_DUMP_TRANS_ADDR     0x00004040
+#endif
+
 
 #define XSTATE_FP_BIT                   0
 #define XSTATE_SSE_BIT                  1
@@ -1477,6 +1483,10 @@ typedef struct CPUX86State {
     /* msr registers for ECPT and CWT*/
 	uint64_t ecpt_msr[ECPT_MAX_WAY];
     uint64_t cwt_msr[CWT_MAX_WAY];
+#endif
+
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    uint64_t msr_dump_trans;
 #endif
 
 	int32_t a20_mask;
