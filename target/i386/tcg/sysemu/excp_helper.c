@@ -724,14 +724,14 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     a20_mask = x86_get_a20_mask(env);
 
 
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     struct radix_trans_info walk_info;
     memset(&walk_info, 0, sizeof(struct radix_trans_info));
     walk_info.vaddr = addr;
     walk_info.access_type = is_write1;
     walk_info.access_size = size;
     walk_info.pc = env->eip;
-    // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "Radix Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n", addr, is_write1, mmu_idx);
+    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "tid=%x cpu->tid=%x\n", cs->thread_id , cpu->thread_id);
 #endif
 
     if (!(pg_mode & PG_MODE_NXE)) {
@@ -762,7 +762,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
                         (((addr >> 48) & 0x1ff) << 3)) & a20_mask;
                 pml5e_addr = GET_HPHYS(cs, pml5e_addr, MMU_DATA_STORE, size, NULL);
 
-// #ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+// #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
 //                 // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PML5E: addr=%" VADDR_PRIx "\n", pml5e_addr);
 // #endif
                 pml5e = x86_ldq_phys(cs, pml5e_addr);
@@ -786,7 +786,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
                     (((addr >> 39) & 0x1ff) << 3)) & a20_mask;
             pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, size, NULL);
 
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
             walk_info.PTEs[0] = pml4e_addr;
             // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PML4E: addr=%" VADDR_PRIx "\n", pml4e_addr);
 #endif
@@ -842,7 +842,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
         }
 
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
         walk_info.PTEs[1] = pdpe_addr;
         // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PDPE: addr=%" VADDR_PRIx "\n", pdpe_addr);
 #endif
@@ -850,7 +850,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             a20_mask;
         pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, size, NULL);
 
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
         walk_info.PTEs[2] = pde_addr;
         // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PDE: addr=%" VADDR_PRIx "\n", pde_addr);
 #endif
@@ -879,7 +879,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
             a20_mask;
         pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, size, NULL);
         
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
         walk_info.PTEs[3] = pte_addr;
         QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "PTE: addr=%" VADDR_PRIx "\n", pdpe_addr);
 #endif
@@ -1028,7 +1028,7 @@ do_check_protect_pse36:
     pte &= PG_ADDRESS_MASK & ~(*page_size - 1);
     page_offset = addr & (*page_size - 1);
     *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, size, prot);
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
     walk_info.page_size = *page_size;
     walk_info.ret_code = PG_ERROR_OK;
@@ -1049,7 +1049,7 @@ do_check_protect_pse36:
          (pg_mode & PG_MODE_SMEP)))
         error_code |= PG_ERROR_I_D_MASK;
 
-#ifdef TARGET_X86_64_RADIX_DUMP_TRANS_ADDR
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
     walk_info.ret_code = error_code;
     print_radix_info(&walk_info);
