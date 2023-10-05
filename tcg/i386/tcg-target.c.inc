@@ -1714,8 +1714,23 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
        path function argument setup.  */
     tcg_out_mov(s, ttype, r1, addrlo);
 
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    CPUState *cpu = s->cpu;
+    CPUX86State* env =  cpu->env_ptr;
+    uint64_t val = env->msr_dump_trans;
+
+    if (val) {
+        /* recording turned on, directly jump to slow st/ld path */
+        tcg_out_opc(s, OPC_JMP_long, 0, 0, 0);
+    } else {
+        /* stick with slow path option */
+        tcg_out_opc(s, OPC_JCC_long + JCC_JNE, 0, 0, 0);
+    }
+#else
     /* jne slow_path */
     tcg_out_opc(s, OPC_JCC_long + JCC_JNE, 0, 0, 0);
+#endif
+
     label_ptr[0] = s->code_ptr;
     s->code_ptr += 4;
 
@@ -1723,8 +1738,22 @@ static inline void tcg_out_tlb_load(TCGContext *s, TCGReg addrlo, TCGReg addrhi,
         /* cmp 4(r0), addrhi */
         tcg_out_modrm_offset(s, OPC_CMP_GvEv, addrhi, r0, which + 4);
 
-        /* jne slow_path */
-        tcg_out_opc(s, OPC_JCC_long + JCC_JNE, 0, 0, 0);
+        #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+            CPUState *cpu = s->cpu;
+            CPUX86State* env =  cpu->env_ptr;
+            uint64_t val = env->msr_dump_trans;
+
+            if (val) {
+                /* recording turned on, directly jump to slow st/ld path */
+                tcg_out_opc(s, OPC_JMP_long, 0, 0, 0);
+            } else {
+                /* stick with slow path option */
+                tcg_out_opc(s, OPC_JCC_long + JCC_JNE, 0, 0, 0);
+            }
+        #else
+            /* jne slow_path */
+            tcg_out_opc(s, OPC_JCC_long + JCC_JNE, 0, 0, 0);
+        #endif
         label_ptr[1] = s->code_ptr;
         s->code_ptr += 4;
     }

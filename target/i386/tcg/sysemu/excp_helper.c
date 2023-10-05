@@ -692,8 +692,15 @@ struct radix_trans_info {
     int ret_code;
 };
 
+#define _LOW (0x400000000000ULL)
+#define _HIGH (_LOW + (0x1ULL << 30))
+
+#define ADDR_IN_RANG(addr) (1)
+// #define ADDR_IN_RANG(addr) (((uint64_t) (addr)) >= _LOW && ((uint64_t) (addr)) < _HIGH)
+
 static void print_radix_info(CPUX86State *env, struct radix_trans_info *info) {
-    if (info->access_size > 0 && env->msr_dump_trans) {
+    // if (info->access_size > 0 && env->msr_dump_trans) {
+    if (info->access_size > 0 && env->msr_dump_trans && ADDR_IN_RANG(info->vaddr)) {
         QEMU_LOG_TRANSLATE(
             0, CPU_LOG_MMU,
             "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "

@@ -72,6 +72,22 @@
         }                                                         \
     } while (0)
 
+// #define DEBUG_TRACE_MMU_LOG
+
+#ifdef DEBUG_TRACE_MMU_LOG
+#define DEBUG_TRACE_MMU_LOG_PRINT(env, FMT, ...)   \
+    do {                                          \
+        if ((env)->msr_dump_trans) {       \
+            qemu_log_mask(CPU_LOG_MMU, FMT, ## __VA_ARGS__);            \
+        }                                               \
+    } while (0)
+#else
+#define DEBUG_TRACE_MMU_LOG_PRINT(env, FMT, ...)   \
+    do {                                          \
+    } while (0)
+#endif
+
+
 /* run_on_cpu_data.target_ptr should always be big enough for a
  * target_ulong even on 32 bit builds */
 QEMU_BUILD_BUG_ON(sizeof(target_ulong) > sizeof(run_on_cpu_data));
@@ -1286,6 +1302,11 @@ static inline ram_addr_t qemu_ram_addr_from_host_nofail(void *ptr)
     return ram_addr;
 }
 
+#define _LOW (0x400000000000ULL)
+#define _HIGH (_LOW + (0x1ULL << 30))
+
+#define ADDR_IN_RANG(addr) (((uint64_t) (addr)) >= _LOW && ((uint64_t) (addr)) < _HIGH)
+
 /*
  * Note: tlb_fill() can trigger a resize of the TLB. This means that all of the
  * caller's prior references to the TLB table (e.g. CPUTLBEntry pointers) must
@@ -1898,8 +1919,10 @@ load_helper(CPUArchState *env, target_ulong addr, TCGMemOpIdx oi,
     const MMUAccessType access_type =
         code_read ? MMU_INST_FETCH : MMU_DATA_LOAD;
     size_t size = memop_size(op);
+
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     /* pull tlb_fill ahead of TLB hit checks, bypassing QEMU TLB, every memory reference goes through the page walk */
+    DEBUG_TRACE_MMU_LOG_PRINT( ((CPUX86State *) env), "load_helper: addr = %lx, op = %d\n", addr, op);
     tlb_fill(env_cpu(env), addr, size,
                      access_type, mmu_idx, retaddr);
 #endif
@@ -2431,10 +2454,14 @@ store_helper_unaligned(CPUArchState *env, target_ulong addr, uint64_t val,
     }
 }
 
+
+
 static inline void QEMU_ALWAYS_INLINE
 store_helper(CPUArchState *env, target_ulong addr, uint64_t val,
              TCGMemOpIdx oi, uintptr_t retaddr, MemOp op)
 {
+    DEBUG_TRACE_MMU_LOG_PRINT( ((CPUX86State *) env), "store_helper: addr = %lx, op = %d\n", addr, op);
+
     uintptr_t mmu_idx = get_mmuidx(oi);
     size_t size = memop_size(op);
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
