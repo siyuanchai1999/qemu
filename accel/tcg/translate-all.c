@@ -1470,7 +1470,15 @@ TranslationBlock *tb_gen_code(CPUState *cpu,
     ti = profile_getclock();
 #endif
 
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    /* unclear why they set tcg_ctx->cpu to NULL. we rely on information it in tcg_out_tlb_load */
+    tcg_ctx->cpu = env_cpu(env);
+#endif
     gen_code_size = tcg_gen_code(tcg_ctx, tb);
+#ifdef TARGET_X86_64_DUMP_TRANS_ADDR
+    tcg_ctx->cpu = NULL;
+#endif
+    
     if (unlikely(gen_code_size < 0)) {
  error_return:
         switch (gen_code_size) {
