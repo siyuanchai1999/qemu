@@ -28,6 +28,8 @@
 
 #include "build/x86_64-softmmu-config-target.h"
 #include <stdint.h>
+#include <stdio.h>
+#include <string.h>
 
 #define QEMU_LOG_TRANSLATE(gdb, MASK, FMT, ...)   \
     do {                                                \
@@ -35,6 +37,33 @@
             qemu_log_mask(MASK, FMT, ## __VA_ARGS__);              \
         }                                               \
     } while (0)
+
+/* control if text logging to mmu.log is enabled */
+// #define ENABLE_WALK_MMU_FILE_LOGGING 
+
+FILE * walk_log_fp = NULL;
+uint64_t written_idx = 0;
+uint64_t total_mapped_size = 0;
+
+int init_walk_info_fp(void) {
+
+    walk_log_fp = fopen("walk_log.bin","wb");
+    
+    if (walk_log_fp == NULL) {
+        perror("fail to open walk_log.bin");
+        return -1;
+    }
+    
+    QEMU_LOG_TRANSLATE(
+                    0, CPU_LOG_MMU,"initialize walk_log_fp at %p \n", walk_log_fp);
+    return 0;
+}
+
+void close_walk_info_fp(void) {
+    if (walk_log_fp != NULL) {
+        fclose(walk_log_fp);
+    }
+}
 
 int get_pg_mode(CPUX86State *env)
 {
@@ -680,34 +709,57 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 
 #else
 
-#define RADIX_LEVEL 4
-struct radix_trans_info {
-    uint64_t vaddr;
-    uint64_t PTEs[RADIX_LEVEL];
-    uint64_t paddr;
-    uint64_t page_size;
-    MMUAccessType access_type;
-    uint32_t access_size;
-    uint64_t pc;
-    int ret_code;
-};
+// struct radix_trans_info walk_info_buf[WALK_INFO_BUF_SIZE];
+// uint64_t walk_info_buf_idx = 0;
+
 
 #define _LOW (0x400000000000ULL)
 #define _HIGH (_LOW + (0x1ULL << 30))
 
-#define ADDR_IN_RANG(addr) (1)
-// #define ADDR_IN_RANG(addr) (((uint64_t) (addr)) >= _LOW && ((uint64_t) (addr)) < _HIGH)
+#define ADDR_IN_RANG(addr) ((addr >= _LOW) && (addr < _HIGH))
+
+static void write_walk_info_buf(CPUX86State *env, struct radix_trans_info *info,
+                                uint32_t size) {
+    int init_ret;
+    uint64_t writte_size;
+    if (info->access_size > 0 && env->msr_dump_trans) {
+        
+        if (walk_log_fp == NULL) {
+            init_ret = init_walk_info_fp();    
+            if (init_ret) {
+                return;
+            }
+        }
+
+        writte_size = fwrite(info, sizeof(struct radix_trans_info) , size, walk_log_fp);
+        if (writte_size != size * sizeof(struct radix_trans_info)) {
+            QEMU_LOG_TRANSLATE(
+                0, CPU_LOG_MMU,
+                "write walk info failed, size=%lx, writte_size=%lx\n",
+                size * sizeof(struct radix_trans_info), writte_size);
+        }
+
+        written_idx += size;
+
+        if (written_idx % (1024 * 1024) == 0) {
+            QEMU_LOG_TRANSLATE(
+                0, CPU_LOG_MMU,"wrote %lx memory references\n", written_idx);
+        }
+    }
+}
 
 static void print_radix_info(CPUX86State *env, struct radix_trans_info *info) {
     // if (info->access_size > 0 && env->msr_dump_trans) {
     if (info->access_size > 0 && env->msr_dump_trans && ADDR_IN_RANG(info->vaddr)) {
+#ifdef ENABLE_WALK_MMU_FILE_LOGGING
         QEMU_LOG_TRANSLATE(
             0, CPU_LOG_MMU,
             "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
-            "PTE3=%lx paddr=%lx page_size=%lx access=%d size=%d pc=%lx success=%d\n",
+            "PTE3=%lx paddr=%lx access=%d size=%d success=%d\n",
             info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2],
-            info->PTEs[3], info->paddr, info->page_size, info->access_type,
-            info->access_size, info->pc, info->ret_code == PG_ERROR_OK);
+            info->PTEs[3], info->paddr, info->access_type,
+            info->access_size, info->success);
+#endif
     }
 }
 
@@ -737,7 +789,6 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     walk_info.vaddr = addr;
     walk_info.access_type = is_write1;
     walk_info.access_size = size;
-    walk_info.pc = env->eip;
     // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "tid=%x cpu->tid=%x\n", cs->thread_id , cpu->thread_id);
 #endif
 
@@ -1037,9 +1088,9 @@ do_check_protect_pse36:
     *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, size, prot);
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
-    walk_info.page_size = *page_size;
-    walk_info.ret_code = PG_ERROR_OK;
+    walk_info.success = 1;
     print_radix_info(env, &walk_info);
+    write_walk_info_buf(env, &walk_info, 1);
 #endif
     return PG_ERROR_OK;
 
@@ -1058,8 +1109,9 @@ do_check_protect_pse36:
 
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     walk_info.paddr = *xlat;
-    walk_info.ret_code = error_code;
+    walk_info.success = 0;
     print_radix_info(env, &walk_info);
+    write_walk_info_buf(env, &walk_info, 1);
 #endif
     return error_code;
 }

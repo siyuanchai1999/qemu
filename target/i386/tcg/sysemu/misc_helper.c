@@ -27,6 +27,7 @@
 
 #include "qemu/log.h"
 #include "ECPT.h"
+#include "tcg/sysemu/excp_helper.h"
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
@@ -323,6 +324,12 @@ void helper_wrmsr(CPUX86State *env)
 #ifdef TARGET_X86_64_DUMP_TRANS_ADDR
     case MSR_DUMP_TRANS_ADDR:
         env->msr_dump_trans = val;
+        
+        if (val == 0) {
+            close_walk_info_fp();
+        }
+
+
         qemu_log_mask(CPU_LOG_MMU, "env->msr_dump_trans =%lx\n", env->msr_dump_trans);
         break;
 #endif
