@@ -21,6 +21,8 @@ NAMES += lockstep
 NAMES += hwprofile
 NAMES += cache
 
+NAMES += addrdump
+
 SONAMES := $(addsuffix .so,$(addprefix lib,$(NAMES)))
 
 # The main QEMU uses Glib extensively so it's perfectly fine to use it

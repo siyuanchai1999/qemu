@@ -480,6 +480,14 @@ uint64_t qemu_plugin_hwaddr_phys_addr(const struct qemu_plugin_hwaddr *haddr);
  */
 const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h);
 
+/*
+ * Get page walk information on each level
+ */
+
+unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, unsigned long *cr3,
+                                   unsigned long *pud, unsigned long *pmd,
+                                   unsigned long *pte, unsigned int *size, unsigned long *entry);
+
 typedef void
 (*qemu_plugin_vcpu_mem_cb_t)(unsigned int vcpu_index,
                              qemu_plugin_meminfo_t info, uint64_t vaddr,

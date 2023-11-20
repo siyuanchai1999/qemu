@@ -1286,6 +1286,14 @@ static inline ram_addr_t qemu_ram_addr_from_host_nofail(void *ptr)
     return ram_addr;
 }
 
+static unsigned long tlb_fill_pgtables(CPUState *cpu, target_ulong addr, int size,
+                              int mmu_idx, unsigned long *cr3, unsigned long *pud,
+                                       unsigned long *pmd, unsigned long *pte,
+                                       unsigned int *page_size, unsigned long *entry) {
+    CPUClass *cc = CPU_GET_CLASS(cpu);
+    return cc->tcg_ops->tlb_fill_pgtables(cpu, addr, size, mmu_idx, cr3, pud, pmd, pte, page_size, entry);
+}
+
 /*
  * Note: tlb_fill() can trigger a resize of the TLB. This means that all of the
  * caller's prior references to the TLB table (e.g. CPUTLBEntry pointers) must
@@ -1484,6 +1492,21 @@ static bool victim_tlb_hit(CPUArchState *env, size_t mmu_idx, size_t index,
 #define VICTIM_TLB_HIT(TY, ADDR) \
   victim_tlb_hit(env, mmu_idx, index, offsetof(CPUTLBEntry, TY), \
                  (ADDR) & TARGET_PAGE_MASK)
+
+/*
+ * Translates a guest virtual address to guest physical address.
+ * Returns guest virtual address, or ~0 on failure.
+ */
+unsigned long translate_guest_virtual(CPUArchState *env, target_ulong addr,
+                                        unsigned long *cr3, unsigned long *pud, unsigned long *pmd,
+                                        unsigned long *pte, unsigned int *size, unsigned long *entry)
+{
+    uintptr_t mmu_idx = cpu_mmu_index(env, true); //the second param is unused on x86
+
+    /* guest physical. */
+    return tlb_fill_pgtables(env_cpu(env), addr, 0, mmu_idx, cr3, pud, pmd, pte, size, entry);
+}
+
 
 /*
  * Return a ram_addr_t for the virtual address for execution.
