@@ -326,6 +326,15 @@ uint64_t qemu_plugin_hwaddr_phys_addr(const struct qemu_plugin_hwaddr *haddr)
     return 0;
 }
 
+unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, unsigned long *cr3,
+                                   unsigned long *pud, unsigned long *pmd,
+                                   unsigned long *pte, unsigned int *size, unsigned long *entry)
+{
+    CPUState *cpu = current_cpu;
+    return translate_guest_virtual(cpu->env_ptr, vaddr, cr3, pud, pmd, pte, size, entry);
+}
+
+
 const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h)
 {
 #ifdef CONFIG_SOFTMMU

@@ -889,6 +889,95 @@ static void print_radix_info(struct radix_trans_info * info) {
         info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2], info->PTEs[3], info->paddr, info->page_size);
 }
 
+static unsigned long mmu_translate_pgtables(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
+                                            uint64_t cr3,int mmu_idx, int pg_mode,
+                                            unsigned long *pgd, unsigned long *pud, unsigned long *pmd,
+                                            unsigned long *pte_table, unsigned int *size, unsigned long *entry) {
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    target_ulong pde_addr, pte_addr;
+    unsigned long pte;
+    uint32_t page_offset;
+    int page_size;
+    int32_t a20_mask;
+    unsigned long physaddr = ~(unsigned long) 0;
+
+    a20_mask = x86_get_a20_mask(env);
+
+    if (pg_mode & PG_MODE_PAE) {
+        uint64_t pde, pdpe;
+        target_ulong pdpe_addr;
+
+        /* IA-32e mode only */
+        if (env->hflags & HF_LMA_MASK) {
+            bool la57 = pg_mode & PG_MODE_LA57;
+            uint64_t pml5e;
+            uint64_t pml4e_addr, pml4e;
+
+           if(!la57) {
+               pml5e = cr3;
+           } else {
+               printf("BUG: LA57 is on\n");
+               exit(1);
+           }
+
+           pml4e_addr = ((pml5e & PG_ADDRESS_MASK) + (((addr >> 39) & 0x1ff) << 3)) &a20_mask;
+           pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, NULL);
+           *pgd = pml4e_addr;
+           pml4e = x86_ldq_phys(cs, pml4e_addr);
+           pdpe_addr = ((pml4e & PG_ADDRESS_MASK) + (((addr >> 30) & 0x1ff) << 3)) & a20_mask;
+           pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, NULL);
+           *pud = pdpe_addr;
+           pdpe = x86_ldq_phys(cs, pdpe_addr);
+           if (pdpe & PG_PSE_MASK) {
+               /* 1 GB page */
+               page_size = 1024 * 1024 * 1024;
+               *size = page_size;
+               pte = pdpe;
+               *pmd = 0u;
+               *pte_table = 0u;
+               *entry = pdpe;
+               goto calculate_phys;
+           }
+           pde_addr = ((pdpe & PG_ADDRESS_MASK) + (((addr >> 21) & 0x1ff) << 3)) & a20_mask;
+           pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, NULL);
+           *pmd = pde_addr;
+           pde = x86_ldq_phys(cs, pde_addr);
+           if (pde & PG_PSE_MASK) {
+               /* 2 MB page */
+               page_size = 2048 * 1024;
+               *size = page_size;
+               pte = pde;
+               *pte_table = 0u;
+               *entry = pde;
+               goto calculate_phys;
+           }
+           /* 4 KB page */
+           pte_addr = ((pde & PG_ADDRESS_MASK) + (((addr >> 12) & 0x1ff) << 3)) & a20_mask;
+           pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
+           *pte_table = pte_addr;
+           pte = x86_ldq_phys(cs, pte_addr);
+           page_size = 4096;
+           *size = page_size;
+           *entry = pte;
+           goto calculate_phys;
+        } else {
+            return physaddr;
+        }
+    } else {
+        return physaddr;
+    }
+
+calculate_phys:
+    pte = pte & a20_mask;
+    /* align to page_size */
+    pte &= PG_ADDRESS_MASK & ~(page_size - 1);
+    page_offset = addr & (page_size - 1);
+    physaddr = GET_HPHYS(cs, pte + page_offset, MMU_DATA_LOAD, NULL);
+
+    return physaddr;
+}
+
 static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb,
                          hwaddr *xlat, int *page_size, int *prot)
@@ -1344,6 +1433,31 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
         cs->exception_index = EXCP0E_PAGE;
         return 1;
     }
+}
+
+unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
+                              int mmu_idx, unsigned long *cr3, unsigned long *pud,
+                                    unsigned long *pmd, unsigned long *pte,
+                                    unsigned int *page_size, unsigned long *entry) {
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    int pg_mode;
+    hwaddr paddr;
+
+    if (!(env->cr[0] & CR0_PG_MASK)) {
+        paddr = addr;
+        if (!(env->hflags & HF_LMA_MASK)) {
+            /* Without long mode we can only address 32bits in real mode */
+            paddr = (uint32_t)paddr;
+        }
+    } else {
+        pg_mode = get_pg_mode(env);
+        paddr = mmu_translate_pgtables(cs, addr, get_hphys, env->cr[3],
+                                   mmu_idx, pg_mode,
+                                   cr3, pud, pmd, pte, page_size, entry);
+    }
+
+    return paddr;
 }
 
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr addr, int size,
