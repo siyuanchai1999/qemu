@@ -17,6 +17,265 @@
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
+#define BIN_LOG
+
+#ifdef BIN_LOG
+
+//
+// Hacks
+//
+
+#if UINTPTR_MAX == UINT32_MAX
+# define HOST_LONG_BITS 32
+#elif UINTPTR_MAX == UINT64_MAX
+# define HOST_LONG_BITS 64
+#else
+# error Unknown pointer size
+#endif
+
+#include "exec/memop.h"
+
+typedef uint32_t MemOpIdx;
+static inline MemOp get_memop(MemOpIdx oi)
+{
+	return oi >> 4;
+}
+
+static inline enum qemu_plugin_mem_rw
+get_plugin_meminfo_rw(qemu_plugin_meminfo_t i)
+{
+	return i >> 16;
+}
+
+//
+// Constants
+//
+
+#define PAGE_TABLE_LEAVES 4
+#define BIN_RECORD_FILE_NAME "walk_log.bin"
+
+#define BIN_RECORD_TYPE_MEM 'M'
+#define BIN_RECORD_TYPE_INS 'I'
+
+//
+// Types
+//
+
+typedef struct FileHandle
+{
+	FILE* fp;
+} FileHandle;
+
+typedef struct MemRecord
+{
+	uint8_t header;
+	uint8_t access_rw;
+	uint16_t access_op;
+	uint32_t access_sz;
+	uint64_t vaddr;
+	uint64_t paddr;
+	uint64_t pte;
+	uint64_t leaves[PAGE_TABLE_LEAVES];
+} MemRecord;
+
+typedef struct InsRecord
+{
+	uint8_t header;
+	uint8_t cpu;
+	uint16_t length;
+	uint32_t opcode;
+	uint64_t vaddr;
+	uint64_t counter;
+	// char disassembly[length];
+} InsRecord;
+
+typedef union BinaryRecord
+{
+	InsRecord ins;
+	MemRecord mem;
+} BinaryRecord;
+
+//
+// Globals
+//
+
+static FileHandle log_handle = { 0 };
+static uint64_t ins_counter = 0;
+
+//
+// Helpers
+//
+
+static inline void instant_suicide(void)
+{
+	// Prepare our tombstone
+	printf(
+		"\n"
+		"Ave Musica... Fall, you'll fall (Fortuna)\n"
+		"Ave Musica... To a place you cannot return from (Lacrima)\n"
+		"Don't worry, there's nothing to fear (trust yourself to me)\n"
+		"Let's begin (eternity) with you (my eternity)\n"
+		"\n"
+		"Unhandled exception at "__FILE__ ":%d\n", __LINE__
+	);
+	fflush(stdout);
+
+	// On Linux this should instantly crash any process
+	//   with a super cool last word of "Illegal instruction (core dumped)"
+	// It is unique enough that no one will confuse it with
+	//   the everyday old friend "Segmentation fault (core dumped)"
+	asm volatile ("ud2" ::: "memory"); // #UD
+	asm volatile ("int1" ::: "memory"); // #DB
+	asm volatile ("int3" ::: "memory"); // #BP
+	asm volatile ("hlt" ::: "memory"); // #GP
+	asm volatile ("xorq %%rax, %%rax\n\tidivq %%rax" ::: "memory"); // #DE
+	abort();
+}
+
+static inline void open_bin_record(void)
+{
+	log_handle.fp = fopen(BIN_RECORD_FILE_NAME, "wb");
+
+	if (!log_handle.fp) {
+		perror("fail to open " BIN_RECORD_FILE_NAME);
+
+		instant_suicide();
+		return;
+	}
+
+	qemu_plugin_outs("created binary log at " BIN_RECORD_FILE_NAME "\n");
+}
+
+static inline void close_bin_record(void)
+{
+	if (log_handle.fp) {
+		fflush(log_handle.fp);
+		fclose(log_handle.fp);
+	}
+}
+
+static inline void write_bin_log(uint64_t size, void* data)
+{
+	uint64_t written = 0;
+
+	if (!log_handle.fp) {
+		return;
+	}
+
+	written = fwrite(data, size, 1, log_handle.fp);
+	if (written != size) {
+		qemu_plugin_outs("write bin record failed\n");
+	}
+}
+
+static inline void write_mem_record(MemRecord *rec)
+{
+	rec->header = BIN_RECORD_TYPE_MEM;
+	write_bin_log(sizeof(MemRecord), rec);
+}
+
+static inline void write_ins_record(InsRecord *rec, char* dias)
+{
+	uint64_t len = strlen(dias);
+
+	len = len > 65535 ? 65535 : len;
+
+	rec->header = BIN_RECORD_TYPE_INS;
+	rec->length = len;
+
+	write_bin_log(sizeof(InsRecord), rec);
+	write_bin_log(len, dias);
+}
+
+/**
+* Add memory read or write information to current instruction log
+*/
+static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
+					uint64_t vaddr, void *udata)
+{
+	MemRecord rec;
+	uint32_t discard;
+
+	rec.access_rw = get_plugin_meminfo_rw(info);
+	rec.access_op = get_memop(info);
+	rec.access_sz = memop_size(rec.access_op);
+	rec.vaddr = vaddr;
+	rec.paddr = qemu_plugin_pa_by_va(vaddr,
+					&rec.leaves[0],
+					&rec.leaves[1],
+					&rec.leaves[2],
+					&rec.leaves[3],
+					&discard,
+					&rec.pte
+				);
+
+	write_mem_record(&rec);
+}
+
+/**
+* Log instruction execution
+*/
+static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
+{
+	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
+	char *dias = qemu_plugin_insn_disas(ins);
+	InsRecord rec;
+
+	rec.cpu = cpu_index;
+	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
+	rec.vaddr = qemu_plugin_insn_vaddr(ins);
+	rec.counter = ins_counter++;
+
+	write_ins_record(&rec, dias);
+}
+
+/**
+* On translation block new translation
+*
+* QEMU convert code by translation block (TB). By hooking here we can then hook
+* a callback on each instruction and memory access.
+*/
+static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
+{
+	struct qemu_plugin_insn *insn;
+
+	size_t n = qemu_plugin_tb_n_insns(tb);
+	for (size_t i = 0; i < n; i++) {
+		// Hopefully this lives long enough
+		// TODO: @fan please test this
+		insn = qemu_plugin_tb_get_insn(tb, i);
+
+		/* Register callback on memory read or write */
+		qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
+										QEMU_PLUGIN_CB_NO_REGS,
+										QEMU_PLUGIN_MEM_RW, NULL);
+
+		/* Register callback on instruction */
+		qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec,
+											QEMU_PLUGIN_CB_NO_REGS, insn);
+	}
+}
+
+static void plugin_exit(qemu_plugin_id_t id, void *p)
+{
+	close_bin_record();
+}
+
+QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
+										const qemu_info_t *info, int argc,
+										char **argv)
+{
+	open_bin_record();
+
+	/* Register translation block and exit callbacks */
+	qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
+	qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
+
+	return 0;
+}
+
+#else
+
 /* Store last executed instruction on each vCPU as a GString */
 GArray *last_exec;
 
@@ -151,3 +410,5 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 
     return 0;
 }
+
+#endif
