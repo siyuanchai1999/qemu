@@ -163,7 +163,7 @@ static inline void write_bin_log(uint64_t size, void* data)
 	}
 
 	written = fwrite(data, size, 1, log_handle.fp);
-	if (written != size) {
+	if (written <= 0) {
 		qemu_plugin_outs("write bin record failed\n");
 	}
 }
@@ -196,7 +196,8 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	MemRecord rec;
 	uint32_t discard;
 
-	rec.access_rw = get_plugin_meminfo_rw(info);
+	/* store: 0, load: 1*/
+	rec.access_rw = !qemu_plugin_mem_is_store(info);
 	rec.access_op = get_memop(info);
 	rec.access_sz = memop_size(rec.access_op);
 	rec.vaddr = vaddr;
@@ -208,6 +209,13 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 					&discard,
 					&rec.pte
 				);
+    // printf("Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
+    //          "PTE3=%lx paddr=%lx access_rw=%d access_op=%d access_sz=%d\n",
+    //          rec.vaddr, rec.leaves[0], rec.leaves[1], rec.leaves[2], rec.leaves[3],
+    //          rec.paddr,
+    //          rec.access_rw,
+    //          rec.access_op,
+    //          rec.access_sz);
 
 	write_mem_record(&rec);
 }
