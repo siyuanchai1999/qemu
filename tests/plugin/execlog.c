@@ -85,6 +85,9 @@ typedef struct InsRecord
 	uint16_t length;
 	uint32_t opcode;
 	uint64_t vaddr;
+	uint64_t paddr;
+	uint64_t pte;
+	uint64_t leaves[PAGE_TABLE_LEAVES];
 	uint64_t counter;
 	// char disassembly[length];
 } InsRecord;
@@ -227,12 +230,21 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 {
 	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
 	char *dias = qemu_plugin_insn_disas(ins);
+    uint32_t discard;
 	InsRecord rec;
 
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
 	rec.vaddr = qemu_plugin_insn_vaddr(ins);
 	rec.counter = ins_counter++;
+    rec.paddr = qemu_plugin_pa_by_va(rec.vaddr,
+					&rec.leaves[0],
+					&rec.leaves[1],
+					&rec.leaves[2],
+					&rec.leaves[3],
+					&discard,
+					&rec.pte
+				);
 
 	write_ins_record(&rec, dias);
 }
