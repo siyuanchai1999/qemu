@@ -35,6 +35,9 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 #include "exec/memop.h"
 
+/* Flag of logging */
+static bool start_logging = false;
+
 typedef uint32_t MemOpIdx;
 static inline MemOp get_memop(MemOpIdx oi)
 {
@@ -252,6 +255,20 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 }
 
 /**
+* Log Toggling
+*/
+
+static void vcpu_magic_r10(unsigned int cpu, void *udata) {
+	if (start_logging == false)
+		start_logging = true;
+}
+
+static void vcpu_magic_r11(unsigned int cpu, void *udata) {
+	if (start_logging == true)
+		start_logging = false;
+}
+
+/**
 * On translation block new translation
 *
 * QEMU convert code by translation block (TB). By hooking here we can then hook
@@ -267,14 +284,29 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 		// TODO: @fan please test this
 		insn = qemu_plugin_tb_get_insn(tb, i);
 
-		/* Register callback on memory read or write */
-		qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
-										QEMU_PLUGIN_CB_NO_REGS,
-										QEMU_PLUGIN_MEM_RW, NULL);
+        uint32_t raw_insn = (*((uint32_t *)qemu_plugin_insn_data(insn))) & 0x00FFFFFFU;
+		if (raw_insn == 0xD2874DU) {
+		    // xchg R10, R10
+			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r10,
+		                                           QEMU_PLUGIN_CB_NO_REGS,
+		                                           NULL);
+		} else if(raw_insn == 0xDB874DU) {
+			// XCHG R11, R11
+			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r11,
+                                                   QEMU_PLUGIN_CB_NO_REGS,
+                                                   NULL);
+        } else {
+			if (start_logging) {
+				/* Register callback on memory read or write */
+				qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
+												QEMU_PLUGIN_CB_NO_REGS,
+												QEMU_PLUGIN_MEM_RW, NULL);
 
-		/* Register callback on instruction */
-		qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec,
-											QEMU_PLUGIN_CB_NO_REGS, insn);
+				/* Register callback on instruction */
+				qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec,
+													QEMU_PLUGIN_CB_NO_REGS, insn);
+			}
+		}
 	}
 }
 
