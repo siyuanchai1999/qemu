@@ -22,6 +22,40 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #ifdef BIN_LOG
 
 //
+// Configurations
+//
+
+// Maximum number of CPU in the system
+#ifndef MAX_CPU_COUNT
+#define MAX_CPU_COUNT 64
+#endif
+
+// Maximum number of instruction recorded
+#ifndef MAX_INS_COUNT
+#define MAX_INS_COUNT (2000000000UL) // 2 billion
+#endif
+
+// CPU instruction fetcher batch size
+#ifndef FRONTEND_FETCH_SIZE
+#define FRONTEND_FETCH_SIZE (16UL)
+#endif
+
+// Number of translation accesses in a single walk
+#ifndef PAGE_TABLE_LEAVES
+#define PAGE_TABLE_LEAVES 4
+#endif
+
+// Name of the log file
+#ifndef BIN_RECORD_FILE_NAME
+#define BIN_RECORD_FILE_NAME "walk_log.bin"
+#endif
+
+// Whether to include instruction decode results
+#ifndef BIN_RECORD_INCL_DECD
+#define BIN_RECORD_INCL_DECD false
+#endif
+
+//
 // Hacks
 //
 
@@ -34,9 +68,6 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
 
 #include "exec/memop.h"
-
-/* Flag of logging */
-static bool start_logging = false;
 
 typedef uint32_t MemOpIdx;
 static inline MemOp get_memop(MemOpIdx oi)
@@ -54,15 +85,11 @@ get_plugin_meminfo_rw(qemu_plugin_meminfo_t i)
 // Constants
 //
 
-#define MAX_CPU_COUNT 64
-#define FRONTEND_FETCH_SIZE (16UL)
 #define FRONTEND_FETCH_MASK (~(FRONTEND_FETCH_SIZE - 1))
-#define PAGE_TABLE_LEAVES 4
-#define BIN_RECORD_FILE_NAME "walk_log.bin"
 
-#define BIN_RECORD_TYPE_MEM 'M'
-#define BIN_RECORD_TYPE_FEC 'F'
-#define BIN_RECORD_TYPE_INS 'I'
+#define BIN_RECORD_TYPE_MEM 'M' // User memory access, use MemRecord
+#define BIN_RECORD_TYPE_FEC 'F' // InsFetcher memory access, use MemRecord
+#define BIN_RECORD_TYPE_INS 'I' // InsDecoder record, use InsRecord
 
 //
 // Types
@@ -92,10 +119,7 @@ typedef struct InsRecord
 	uint16_t length;
 	uint32_t opcode;
 	uint64_t vaddr;
-	uint64_t paddr;
-	uint64_t pte;
-	uint64_t leaves[PAGE_TABLE_LEAVES];
-	// uint64_t counter;
+	uint64_t counter;
 	// char disassembly[length];
 } InsRecord;
 
@@ -109,6 +133,7 @@ typedef union BinaryRecord
 // Globals
 //
 
+static bool start_logging = false;
 static FileHandle log_handle = { 0 };
 static uint64_t ins_counter = 0;
 static uint64_t ins_fetched[MAX_CPU_COUNT] = { 0 };
@@ -213,6 +238,9 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	MemRecord rec;
 	uint32_t discard;
 
+	if (!start_logging)
+		return;
+
 	/* store: 0, load: 1*/
 	rec.access_rw = !qemu_plugin_mem_is_store(info);
 	rec.access_op = get_memop(info);
@@ -237,30 +265,33 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	write_mem_record(&rec);
 }
 
+static void do_ins_counting(void)
+{
+	ins_counter++;
+
+	if (ins_counter > MAX_INS_COUNT) {
+		start_logging = false;
+
+		ins_counter = 0;
+	}
+}
+
 /**
 * Log instruction execution
 */
-[[maybe_unused]] static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
+static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 {
 	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
 	char *dias = qemu_plugin_insn_disas(ins);
-	uint32_t discard;
 	InsRecord rec;
 
-	ins_counter++;
+	if (!start_logging)
+		return;
 
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
 	rec.vaddr = qemu_plugin_insn_vaddr(ins);
-	// rec.counter = ins_counter;
-	rec.paddr = qemu_plugin_pa_by_va(rec.vaddr,
-					&rec.leaves[0],
-					&rec.leaves[1],
-					&rec.leaves[2],
-					&rec.leaves[3],
-					&discard,
-					&rec.pte
-				);
+	rec.counter = ins_counter;
 
 	write_ins_record(&rec, dias);
 }
@@ -275,10 +306,17 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	uint64_t ins_line = qemu_plugin_insn_vaddr(ins) & FRONTEND_FETCH_MASK;
 	MemRecord rec;
 
-	ins_counter++;
-
-	if (ins_fetched[cpu] == ins_line)
+	if (!start_logging)
 		return;
+
+	do_ins_counting();
+
+	if (ins_fetched[cpu] == ins_line) {
+		if (BIN_RECORD_INCL_DECD)
+			vcpu_insn_exec(cpu_index, udata);
+
+		return;
+	}
 
 	ins_fetched[cpu] = ins_line;
 
@@ -291,11 +329,14 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 					&rec.leaves[1],
 					&rec.leaves[2],
 					&rec.leaves[3],
-					&cpu, // cpu is no longer used, so just put it here
+					&cpu, // cpu is no longer used, so just reuse it here
 					&rec.pte
 				);
 
 	write_ins_fetch(&rec);
+
+	if (BIN_RECORD_INCL_DECD)
+		vcpu_insn_exec(cpu_index, udata);
 }
 
 /**
@@ -303,13 +344,11 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 */
 
 static void vcpu_magic_r10(unsigned int cpu, void *udata) {
-	if (start_logging == false)
-		start_logging = true;
+	start_logging = true;
 }
 
 static void vcpu_magic_r11(unsigned int cpu, void *udata) {
-	if (start_logging == true)
-		start_logging = false;
+	start_logging = false;
 }
 
 /**
