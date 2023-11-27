@@ -54,10 +54,14 @@ get_plugin_meminfo_rw(qemu_plugin_meminfo_t i)
 // Constants
 //
 
+#define MAX_CPU_COUNT 64
+#define FRONTEND_FETCH_SIZE (16UL)
+#define FRONTEND_FETCH_MASK (~(FRONTEND_FETCH_SIZE - 1))
 #define PAGE_TABLE_LEAVES 4
 #define BIN_RECORD_FILE_NAME "walk_log.bin"
 
 #define BIN_RECORD_TYPE_MEM 'M'
+#define BIN_RECORD_TYPE_FEC 'F'
 #define BIN_RECORD_TYPE_INS 'I'
 
 //
@@ -107,6 +111,7 @@ typedef union BinaryRecord
 
 static FileHandle log_handle = { 0 };
 static uint64_t ins_counter = 0;
+static uint64_t ins_fetched[MAX_CPU_COUNT] = { 0 };
 
 //
 // Helpers
@@ -193,6 +198,12 @@ static inline void write_ins_record(InsRecord *rec, char* dias)
 	// write_bin_log(len, dias);
 }
 
+static inline void write_ins_fetch(MemRecord *rec)
+{
+	rec->header = BIN_RECORD_TYPE_FEC;
+	write_bin_log(sizeof(MemRecord), rec);
+}
+
 /**
 * Add memory read or write information to current instruction log
 */
@@ -229,20 +240,20 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 /**
 * Log instruction execution
 */
-static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
+[[maybe_unused]] static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 {
 	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
 	char *dias = qemu_plugin_insn_disas(ins);
-    uint32_t discard;
+	uint32_t discard;
 	InsRecord rec;
 
-    ins_counter++;
-    
+	ins_counter++;
+
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
 	rec.vaddr = qemu_plugin_insn_vaddr(ins);
 	// rec.counter = ins_counter;
-    rec.paddr = qemu_plugin_pa_by_va(rec.vaddr,
+	rec.paddr = qemu_plugin_pa_by_va(rec.vaddr,
 					&rec.leaves[0],
 					&rec.leaves[1],
 					&rec.leaves[2],
@@ -252,6 +263,39 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 				);
 
 	write_ins_record(&rec, dias);
+}
+
+/**
+* Log frontend instruction fetch
+*/
+static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
+{
+	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
+	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
+	uint64_t ins_line = qemu_plugin_insn_vaddr(ins) & FRONTEND_FETCH_MASK;
+	MemRecord rec;
+
+	ins_counter++;
+
+	if (ins_fetched[cpu] == ins_line)
+		return;
+
+	ins_fetched[cpu] = ins_line;
+
+	rec.access_rw = 1;
+	rec.access_op = 0;
+	rec.access_sz = FRONTEND_FETCH_SIZE;
+	rec.vaddr = ins_line;
+	rec.paddr = qemu_plugin_pa_by_va(ins_line,
+					&rec.leaves[0],
+					&rec.leaves[1],
+					&rec.leaves[2],
+					&rec.leaves[3],
+					&cpu, // cpu is no longer used, so just put it here
+					&rec.pte
+				);
+
+	write_ins_fetch(&rec);
 }
 
 /**
@@ -284,18 +328,18 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 		// TODO: @fan please test this
 		insn = qemu_plugin_tb_get_insn(tb, i);
 
-        uint32_t raw_insn = (*((uint32_t *)qemu_plugin_insn_data(insn))) & 0x00FFFFFFU;
+		uint32_t raw_insn = (*((uint32_t *)qemu_plugin_insn_data(insn))) & 0x00FFFFFFU;
 		if (raw_insn == 0xD2874DU) {
-		    // xchg R10, R10
+			// xchg R10, R10
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r10,
-		                                           QEMU_PLUGIN_CB_NO_REGS,
-		                                           NULL);
+												QEMU_PLUGIN_CB_NO_REGS,
+												NULL);
 		} else if(raw_insn == 0xDB874DU) {
 			// XCHG R11, R11
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r11,
-                                                   QEMU_PLUGIN_CB_NO_REGS,
-                                                   NULL);
-        } else {
+												QEMU_PLUGIN_CB_NO_REGS,
+												NULL);
+		} else {
 			if (start_logging) {
 				/* Register callback on memory read or write */
 				qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
@@ -303,7 +347,7 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 												QEMU_PLUGIN_MEM_RW, NULL);
 
 				/* Register callback on instruction */
-				qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_exec,
+				qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
 													QEMU_PLUGIN_CB_NO_REGS, insn);
 			}
 		}
