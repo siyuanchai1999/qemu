@@ -266,10 +266,15 @@ static void do_ins_counting(void)
 {
 	ins_counter++;
 
+    if(ins_counter % 1000000UL == 0) { // every 1 million instr
+        printf("[Sim Plugin] Reached %lu instrs\n", ins_counter);
+    }
+
 	if (ins_counter > MAX_INS_COUNT) {
 		start_logging = false;
-
 		ins_counter = 0;
+
+		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
 	}
 }
 
