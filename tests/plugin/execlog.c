@@ -6,6 +6,7 @@
  * License: GNU GPL, version 2 or later.
  *   See the COPYING file in the top-level directory.
  */
+
 #include <glib.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -14,6 +15,10 @@
 #include <unistd.h>
 
 #include <qemu-plugin.h>
+
+#include <assert.h>
+#include <linux/limits.h>
+
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
@@ -46,9 +51,11 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
 
 // Name of the log file
-#ifndef BIN_RECORD_FILE_NAME
-#define BIN_RECORD_FILE_NAME "walk_log.bin"
+#ifndef DEFAULT_BIN_RECORD_FILE_NAME
+#define DEFAULT_BIN_RECORD_FILE_NAME "walk_log.bin"
 #endif
+
+static char bin_record_file_name[PATH_MAX];
 
 // Whether to include instruction decode results
 #ifndef BIN_RECORD_INCL_DECD
@@ -170,16 +177,16 @@ static inline void instant_suicide(void)
 
 static inline void open_bin_record(void)
 {
-	log_handle.fp = fopen(BIN_RECORD_FILE_NAME, "wb");
+	log_handle.fp = fopen(bin_record_file_name, "wb");
 
 	if (!log_handle.fp) {
-		perror("fail to open " BIN_RECORD_FILE_NAME);
+		fprintf(stderr, "failed to open %s", bin_record_file_name);
+		perror("fopen");
 
 		instant_suicide();
 		return;
 	}
-
-	qemu_plugin_outs("created binary log at " BIN_RECORD_FILE_NAME "\n");
+	printf("[Sim Plugin] Created binary log at %s\n", bin_record_file_name);
 }
 
 static inline void close_bin_record(void)
@@ -388,6 +395,123 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 		}
 	}
 }
+////////////////////////////////////////////////////////////////////////////////
+// Argument parsing logic
+////////////////////////////////////////////////////////////////////////////////
+
+#define SYSEXPECT(expr) do { if(!(expr)) { perror(__func__); assert(0); exit(1); } } while(0)
+#define SYSEXPECT_FILE(expr, path) do { if(!(expr)) { printf("File operation failed with path: \"%s\"\n", path); perror(__func__); assert(0); exit(1); } } while(0)
+#define error_exit(fmt, ...) do { fprintf(stderr, "%s error: " fmt, __func__, ##__VA_ARGS__); assert(0); exit(1); } while(0);
+
+inline static int streq(const char *a, const char *b) { return strcmp(a, b) == 0; } 
+
+// This is the node of argv which forms a linked list
+typedef struct argv_node {
+    char *key;     // Must not duplicate -- check on insertion
+    char *value;   // Could be NULL
+    int index;
+    struct argv_node *next;
+} argv_node_t;
+
+// Linked list head of options
+static argv_node_t *options = NULL;
+
+static void process_argv(int argc, char **argv) {
+    for(int i = 0;i < argc;i++) {
+        char *arg = argv[i];
+        int len = strlen(arg);
+        // Parse key and argument
+        char *equal_sign = arg;
+        while(*equal_sign != '=' && *equal_sign != '\0') {
+            equal_sign++;
+        }
+        // Check for errors
+        if(*arg == '\0') {
+            error_exit("[Sim Plugin] Argument on index %d is empty (without value)\n", i);
+        } else if(arg == equal_sign) {
+            error_exit("[Sim Plugin] Argument on index %d is empty (with value)\n", i);
+        }
+        char *key;
+        char *value;
+        int key_len = equal_sign - arg;
+        int value_len = len - (equal_sign + 1 - arg);
+        if(*equal_sign == '\0') {
+            value = NULL;
+        } else {
+            value = (char *)malloc(value_len + 1);
+            SYSEXPECT(value != NULL);
+            memcpy(value, equal_sign + 1, value_len);
+            value[value_len] = '\0';
+        }
+        key = (char *)malloc(key_len + 1);
+        SYSEXPECT(key != NULL);
+        memcpy(key, arg, key_len);
+        key[key_len] = '\0';
+        argv_node_t *node = (argv_node_t *)malloc(sizeof(argv_node_t));
+        SYSEXPECT(node != NULL);
+        node->key = key;
+        node->value = value;
+        node->next = NULL;
+        node->index = i;
+        // Insert the node into the end of the linked list
+        // We check key duplication along the way as well
+        if(options == NULL) {
+            options = node;
+        } else {
+            argv_node_t *curr = options;
+            while(1) {
+                if(streq(curr->key, key) == 1) {
+                    error_exit("Key on index %d duplicates with key on index %d, key = \"%s\"\n", 
+                        i, curr->index, key);
+                }
+                if(curr->next == NULL) {
+                    curr->next = node;
+                    break;
+                }
+                curr = curr->next;
+            }
+        }
+    }
+    // Print all options
+    printf("[Sim Plugin] The plugin is loaded with the following options:\n");
+    argv_node_t *curr = options;
+    while(curr != NULL) {
+        printf("[Sim Plugin] Index %d key \"%s\" value \"%s\"\n", curr->index, curr->key, curr->value);
+        curr = curr->next;
+    }
+}
+
+// This function searches the options list, and finds the one with the matching key
+// If the key is found, return 1, and value is set to the value
+// Otherwise, return 0, and value is always NULL
+// Note that the value read remain valid strings during the run
+static int find_option(const char *key, char **value) {
+    argv_node_t *node = options;
+    while(node != NULL) {
+        if(strcmp(node->key, key) == 0) {
+            *value = node->value;
+            return 1;
+        }
+        node = node->next;
+    }
+    *value = NULL;
+    return 0;
+}
+static void setup_bin_record_name(void) {
+    char *input_filename;
+    int found = find_option("filename", &input_filename);
+    if(found == 0) {
+        printf("[Sim Plugin] Did not find plugin argument filename, use default filename \"" DEFAULT_BIN_RECORD_FILE_NAME "\"\n");
+		strcpy(bin_record_file_name, DEFAULT_BIN_RECORD_FILE_NAME);
+    } else {
+		if(strlen(input_filename) >= PATH_MAX) {
+			error_exit("[Sim Plugin] Log filename too long (>= PATH_MAX)\n");
+		}
+        printf("[Sim Plugin] Set log file to \"%s\"\n", input_filename);
+		strcpy(bin_record_file_name, input_filename);
+    }
+}
+
 
 static void plugin_exit(qemu_plugin_id_t id, void *p)
 {
@@ -398,6 +522,9 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 										const qemu_info_t *info, int argc,
 										char **argv)
 {
+    process_argv(argc, argv);
+	setup_bin_record_name();
+
 	open_bin_record();
 
 	/* Register translation block and exit callbacks */
