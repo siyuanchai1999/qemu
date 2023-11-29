@@ -238,9 +238,6 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	MemRecord rec;
 	uint32_t discard;
 
-	if (!start_logging)
-		return;
-
 	/* store: 0, load: 1*/
 	rec.access_rw = !qemu_plugin_mem_is_store(info);
 	rec.access_op = get_memop(info);
@@ -285,9 +282,6 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 	char *dias = qemu_plugin_insn_disas(ins);
 	InsRecord rec;
 
-	if (!start_logging)
-		return;
-
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
 	rec.vaddr = qemu_plugin_insn_vaddr(ins);
@@ -305,9 +299,6 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
 	uint64_t ins_line = qemu_plugin_insn_vaddr(ins) & FRONTEND_FETCH_MASK;
 	MemRecord rec;
-
-	if (!start_logging)
-		return;
 
 	do_ins_counting();
 
