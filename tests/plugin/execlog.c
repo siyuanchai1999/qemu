@@ -111,7 +111,7 @@ typedef struct MemRecord
 {
 	uint8_t header;
 	uint8_t access_rw;
-	uint16_t access_op;
+	uint16_t access_cpu;
 	uint32_t access_sz;
 	uint64_t vaddr;
 	uint64_t paddr;
@@ -178,6 +178,10 @@ static inline void instant_suicide(void)
 static int flush_to_disk(FILE *fp)
 {
     int ret;
+    if (fp == NULL) {
+        return -1;
+    }
+
     ret = fflush(fp);
     if (ret != 0)
         return -1;
@@ -204,7 +208,7 @@ static inline void open_bin_record(void)
 }
 
 static inline void close_bin_record(void)
-{
+{   
 	if (log_handle.fp) {
         flush_to_disk(log_handle.fp);
 		fclose(log_handle.fp);
@@ -261,10 +265,15 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	MemRecord rec;
 	uint32_t discard;
 
+    if (!start_logging) {
+        return;
+    }
+        
+
 	/* store: 0, load: 1*/
 	rec.access_rw = !qemu_plugin_mem_is_store(info);
-	rec.access_op = get_memop(info);
-	rec.access_sz = memop_size(rec.access_op);
+	rec.access_cpu = cpu_index % MAX_CPU_COUNT; /* dummy field for now. introduced because of different QEMU version @jiyuan */
+	rec.access_sz = 1 << qemu_plugin_mem_size_shift(info);
 	rec.vaddr = vaddr;
 	rec.paddr = qemu_plugin_pa_by_va(vaddr,
 					&rec.leaves[0],
@@ -275,11 +284,11 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 					&rec.pte
 				);
     // printf("Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
-    //          "PTE3=%lx paddr=%lx access_rw=%d access_op=%d access_sz=%d\n",
+    //          "PTE3=%lx paddr=%lx access_rw=%d access_cpu=%d access_sz=%d\n",
     //          rec.vaddr, rec.leaves[0], rec.leaves[1], rec.leaves[2], rec.leaves[3],
     //          rec.paddr,
     //          rec.access_rw,
-    //          rec.access_op,
+    //          rec.access_cpu,
     //          rec.access_sz);
 
 	write_mem_record(&rec);
@@ -306,9 +315,15 @@ static void do_ins_counting(void)
 */
 static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 {
+    
 	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
 	char *dias = qemu_plugin_insn_disas(ins);
 	InsRecord rec;
+
+    if (!start_logging){
+        return;
+    }
+        
 
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
@@ -328,6 +343,10 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	uint64_t ins_line = qemu_plugin_insn_vaddr(ins) & FRONTEND_FETCH_MASK;
 	MemRecord rec;
 
+    if (!start_logging) {
+        return;
+    }
+
 	do_ins_counting();
 
 	if (ins_fetched[cpu] == ins_line) {
@@ -340,7 +359,7 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	ins_fetched[cpu] = ins_line;
 
 	rec.access_rw = 1;
-	rec.access_op = 0;
+	rec.access_cpu = cpu;
 	rec.access_sz = FRONTEND_FETCH_SIZE;
 	rec.vaddr = ins_line;
 	rec.paddr = qemu_plugin_pa_by_va(ins_line,
@@ -536,8 +555,17 @@ static void setup_bin_record_name(void) {
 
 static void plugin_exit(qemu_plugin_id_t id, void *p)
 {
+    printf("[Sim Plugin] Closed binary log filexxxxxx\n");
 	close_bin_record();
+    instant_suicide();
 }
+
+// static void plugin_exit(qemu_plugin_id_t id, unsigned int vcpu_index)
+// {
+//     printf("[Sim Plugin] Closed binary log filexxxxxx\n");
+// 	close_bin_record();
+//     instant_suicide();
+// }
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 										const qemu_info_t *info, int argc,
@@ -550,7 +578,10 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 
 	/* Register translation block and exit callbacks */
 	qemu_plugin_register_vcpu_tb_trans_cb(id, vcpu_tb_trans);
-	qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
+    // qemu_plugin_register_vcpu_exit_cb(id, plugin_exit);
+	
+    /* NOTE: this atexit call back has not been called when ./shutdown finished */
+    qemu_plugin_register_atexit_cb(id, plugin_exit, NULL);
 
 	return 0;
 }
