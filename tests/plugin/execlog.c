@@ -175,6 +175,20 @@ static inline void instant_suicide(void)
 	abort();
 }
 
+static int flush_to_disk(FILE *fp)
+{
+    int ret;
+    ret = fflush(fp);
+    if (ret != 0)
+        return -1;
+
+    ret = fsync(fileno(fp));
+    if (ret < 0)
+         return -1;
+
+    return 0;
+}
+
 static inline void open_bin_record(void)
 {
 	log_handle.fp = fopen(bin_record_file_name, "wb");
@@ -192,8 +206,10 @@ static inline void open_bin_record(void)
 static inline void close_bin_record(void)
 {
 	if (log_handle.fp) {
-		fflush(log_handle.fp);
+        flush_to_disk(log_handle.fp);
 		fclose(log_handle.fp);
+
+        printf("[Sim Plugin] Closed binary log file descriptor\n");
 	}
 }
 
@@ -348,10 +364,15 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 
 static void vcpu_magic_r10(unsigned int cpu, void *udata) {
 	start_logging = true;
+    printf("[Sim Plugin] magic instruction r10 is executed!\n");
 }
 
 static void vcpu_magic_r11(unsigned int cpu, void *udata) {
 	start_logging = false;
+    printf("[Sim Plugin] magic instruction r11 is executed!\n");
+    if (flush_to_disk(log_handle.fp) < 0) {
+        instant_suicide();
+    }
 }
 
 /**
