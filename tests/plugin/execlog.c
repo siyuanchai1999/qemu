@@ -422,16 +422,22 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 												QEMU_PLUGIN_CB_NO_REGS,
 												NULL);
 		} else {
-			if (start_logging) {
-				/* Register callback on memory read or write */
-				qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
-												QEMU_PLUGIN_CB_NO_REGS,
-												QEMU_PLUGIN_MEM_RW, NULL);
+            
+            /**
+             * Note: we have to register all ins before start_logging becomes true
+             * because this function is being called at translation time.
+             * Otherwise, the the translation blocks translated before start_logging=true
+             * will not be logged since it will not be translated again.
+            */
 
-				/* Register callback on instruction */
-				qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
-													QEMU_PLUGIN_CB_NO_REGS, insn);
-			}
+            /* Register callback on memory read or write */
+            qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
+                                            QEMU_PLUGIN_CB_NO_REGS,
+                                            QEMU_PLUGIN_MEM_RW, NULL);
+
+            /* Register callback on instruction */
+            qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
+                                                QEMU_PLUGIN_CB_NO_REGS, insn);
 		}
 	}
 }
