@@ -811,7 +811,8 @@ static void pr_ops(void)
                 break;
             }
         }
-        printf("op[%2i]: %s %s %s\n", i, tcg_op_defs[op->opc].name, name, type);
+        // printf("op[%2i]: %s %s %s\n", i, tcg_op_defs[op->opc].name, name, type);
+        qemu_log_mask(CPU_LOG_EXEC,"op[%2i]: %s %s %s\n", i, tcg_op_defs[op->opc].name, name, type);
         i++;
     }
 #endif
