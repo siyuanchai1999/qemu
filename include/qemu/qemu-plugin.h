@@ -487,6 +487,8 @@ const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h);
 unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, unsigned long *cr3,
                                    unsigned long *pud, unsigned long *pmd,
                                    unsigned long *pte, unsigned int *size, unsigned long *entry);
+                                  
+unsigned long qemu_plugin_read_cr3(void);
 
 typedef void
 (*qemu_plugin_vcpu_mem_cb_t)(unsigned int vcpu_index,

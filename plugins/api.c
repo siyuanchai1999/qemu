@@ -334,6 +334,13 @@ unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, unsigned long *cr3
     return translate_guest_virtual(cpu->env_ptr, vaddr, cr3, pud, pmd, pte, size, entry);
 }
 
+unsigned long qemu_plugin_read_cr3(void)
+{
+    CPUState *cpu = current_cpu;
+    X86CPU *x86cpu = X86_CPU(cpu);
+    CPUX86State *env = &x86cpu->env;
+    return env->cr[3];
+}
 
 const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h)
 {
