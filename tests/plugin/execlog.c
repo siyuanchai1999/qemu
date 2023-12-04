@@ -56,6 +56,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
 
 static char bin_record_file_name[PATH_MAX];
+static unsigned long target_cr3;
 
 // Whether to include instruction decode results
 #ifndef BIN_RECORD_INCL_DECD
@@ -265,6 +266,24 @@ static inline void write_ins_fetch(MemRecord *rec)
 #endif
 }
 
+static int should_do_logging(void)
+{
+    if (!start_logging){
+        return 0;
+    }
+
+    if (qemu_plugin_read_cr3() != target_cr3) {
+#ifdef DEBUG_EXECLOG    
+        char buf[256];
+        sprintf(buf, "[Sim Plugin] vcpu_mem: cr3=%lx, target_cr3=%lx\n", qemu_plugin_read_cr3(), target_cr3);
+        qemu_plugin_outs(buf);
+#endif
+        return 0;
+    }
+    
+    return 1;
+}
+
 /**
 * Add memory read or write information to current instruction log
 */
@@ -274,10 +293,9 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	MemRecord rec;
 	uint32_t discard;
 
-    if (!start_logging) {
+    if (!should_do_logging()) {
         return;
     }
-        
 
 	/* store: 0, load: 1*/
 	rec.access_rw = !qemu_plugin_mem_is_store(info);
@@ -313,7 +331,7 @@ static void do_ins_counting(void)
 {
 	ins_counter++;
 
-    if(ins_counter % 1000000UL == 0) { // every 1 million instr
+    if(ins_counter % 5000000UL == 0) { // every 5 million instr
         printf("[Sim Plugin] Reached %lu instrs\n", ins_counter);
     }
 
@@ -356,19 +374,19 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
 	uint64_t ins_pc = (uint64_t) udata;
     uint64_t ins_line = ins_pc & FRONTEND_FETCH_MASK;
-	MemRecord rec;
+    MemRecord rec;
 
-    if (!start_logging) {
+    if (!should_do_logging()) {
         return;
     }
 
 	do_ins_counting();
 
 	if (ins_fetched[cpu] == ins_line) {
-		if (BIN_RECORD_INCL_DECD)
-			vcpu_insn_exec(cpu_index, udata);
+	if (BIN_RECORD_INCL_DECD)
+	vcpu_insn_exec(cpu_index, udata);
 
-		return;
+	return;
 	}
 
 	ins_fetched[cpu] = ins_line;
@@ -437,6 +455,8 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 		uint32_t raw_insn = (*((uint32_t *)qemu_plugin_insn_data(insn))) & 0x00FFFFFFU;
 		if (raw_insn == 0xD2874DU) {
 			// xchg R10, R10
+            target_cr3 = qemu_plugin_read_cr3();
+            printf("[Sim Plugin] Begin simulation, cr3=%lx\n", target_cr3);
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r10,
 												QEMU_PLUGIN_CB_NO_REGS,
 												NULL);
