@@ -76,6 +76,9 @@ static char bin_record_file_name[PATH_MAX];
 
 #include "exec/memop.h"
 
+/* #define DEBUG_EXECLOG */
+
+
 typedef uint32_t MemOpIdx;
 static inline MemOp get_memop(MemOpIdx oi)
 {
@@ -254,6 +257,12 @@ static inline void write_ins_fetch(MemRecord *rec)
 {
 	rec->header = BIN_RECORD_TYPE_FEC;
 	write_bin_log(sizeof(MemRecord), rec);
+
+#ifdef DEBUG_EXECLOG    
+    char buf[1024];
+    sprintf(buf, "Record Fetch: vaddr=%016lx\n", rec->vaddr);
+    qemu_plugin_outs(buf);
+#endif
 }
 
 /**
@@ -290,6 +299,12 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
     //          rec.access_rw,
     //          rec.access_cpu,
     //          rec.access_sz);
+
+#ifdef DEBUG_EXECLOG 
+    char buf[1024];
+    sprintf(buf, "Record Load/Store: vaddr=%016lx read=%d pc=%016lx\n", rec.vaddr, rec.access_rw, (uint64_t) udata);
+    qemu_plugin_outs(buf);
+#endif
 
 	write_mem_record(&rec);
 }
@@ -338,9 +353,9 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 */
 static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 {
-	struct qemu_plugin_insn *ins = (struct qemu_plugin_insn *) udata;
 	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
-	uint64_t ins_line = qemu_plugin_insn_vaddr(ins) & FRONTEND_FETCH_MASK;
+	uint64_t ins_pc = (uint64_t) udata;
+    uint64_t ins_line = ins_pc & FRONTEND_FETCH_MASK;
 	MemRecord rec;
 
     if (!start_logging) {
@@ -407,8 +422,17 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 	size_t n = qemu_plugin_tb_n_insns(tb);
 	for (size_t i = 0; i < n; i++) {
 		// Hopefully this lives long enough
-		// TODO: @fan please test this
 		insn = qemu_plugin_tb_get_insn(tb, i);
+
+        /**
+         * Note: we cannot pass insn directly to vcpu_insn_fetch call back
+         *  becaue qemu_plugin_tb and ptb->insn are shared across translations in QEMU.
+         * More elegantly, we can define a custom data structure called insn_fetch_udata
+         * which wraps all data we need.
+         * For now, the only data we need is the pc of a insn (insn_vaddr here),
+         * so we did a bit dirty hack which code pc as address udata ptr. 
+        */
+        uint64_t insn_vaddr = qemu_plugin_insn_vaddr(insn);
 
 		uint32_t raw_insn = (*((uint32_t *)qemu_plugin_insn_data(insn))) & 0x00FFFFFFU;
 		if (raw_insn == 0xD2874DU) {
@@ -433,11 +457,12 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
             /* Register callback on memory read or write */
             qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
                                             QEMU_PLUGIN_CB_NO_REGS,
-                                            QEMU_PLUGIN_MEM_RW, NULL);
+                                            QEMU_PLUGIN_MEM_RW, (void *) insn_vaddr);
 
             /* Register callback on instruction */
+
             qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
-                                                QEMU_PLUGIN_CB_NO_REGS, insn);
+                                                QEMU_PLUGIN_CB_NO_REGS, (void *) insn_vaddr);
 		}
 	}
 }
