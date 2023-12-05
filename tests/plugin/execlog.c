@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 
 // Maximum number of instruction recorded
 #ifndef MAX_INS_COUNT
-#define MAX_INS_COUNT (2000000000UL) // 2 billion
+#define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
 
 // CPU instruction fetcher batch size
@@ -340,6 +340,16 @@ static void do_ins_counting(void)
 		ins_counter = 0;
 
 		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
+
+        close_bin_record();
+
+        printf("[Sim Plugin] Preparing to die\n");
+        sleep(5);
+
+        /* There could be more elegant way to shut this down, but I didn't yet figure out. */
+        /* If you want to do so, find qemu_plugin_vm_shutdown impl in plugins/api.c  */
+        instant_suicide();
+        // qemu_plugin_vm_shutdown ();
 	}
 }
 
