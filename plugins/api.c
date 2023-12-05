@@ -41,6 +41,7 @@
 #include "exec/ram_addr.h"
 #include "disas/disas.h"
 #include "plugin.h"
+#include "sysemu/runstate.h"
 #ifndef CONFIG_USER_ONLY
 #include "qemu/plugin-memory.h"
 #include "hw/boards.h"
@@ -340,6 +341,11 @@ unsigned long qemu_plugin_read_cr3(void)
     X86CPU *x86cpu = X86_CPU(cpu);
     CPUX86State *env = &x86cpu->env;
     return env->cr[3];
+}
+
+void qemu_plugin_vm_shutdown(void)
+{
+    qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_PANIC);
 }
 
 const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h)
