@@ -348,8 +348,7 @@ static void do_ins_counting(void)
 
         /* There could be more elegant way to shut this down, but I didn't yet figure out. */
         /* If you want to do so, find qemu_plugin_vm_shutdown impl in plugins/api.c  */
-        instant_suicide();
-        // qemu_plugin_vm_shutdown ();
+        qemu_plugin_vm_shutdown ();
 	}
 }
 
@@ -618,7 +617,7 @@ static void plugin_exit(qemu_plugin_id_t id, void *p)
 {
     printf("[Sim Plugin] Closed binary log filexxxxxx\n");
 	close_bin_record();
-    instant_suicide();
+    qemu_plugin_vm_shutdown();
 }
 
 // static void plugin_exit(qemu_plugin_id_t id, unsigned int vcpu_index)
