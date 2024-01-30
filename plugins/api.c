@@ -327,14 +327,11 @@ uint64_t qemu_plugin_hwaddr_phys_addr(const struct qemu_plugin_hwaddr *haddr)
     return 0;
 }
 
-unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, unsigned long *cr3,
-                                   unsigned long *pud, unsigned long *pmd,
-                                   unsigned long *pte, unsigned int *size, unsigned long *entry)
+unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, void * trans_info) 
 {
     CPUState *cpu = current_cpu;
-    return translate_guest_virtual(cpu->env_ptr, vaddr, cr3, pud, pmd, pte, size, entry);
+    return translate_guest_virtual(cpu->env_ptr, vaddr, trans_info);
 }
-
 unsigned long qemu_plugin_read_cr3(void)
 {
     CPUState *cpu = current_cpu;

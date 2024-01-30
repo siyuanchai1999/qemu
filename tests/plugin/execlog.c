@@ -34,7 +34,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #ifndef MAX_CPU_COUNT
 #define MAX_CPU_COUNT 64
 #endif
-
+                       
 // Maximum number of instruction recorded
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
@@ -43,11 +43,6 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 // CPU instruction fetcher batch size
 #ifndef FRONTEND_FETCH_SIZE
 #define FRONTEND_FETCH_SIZE (16UL)
-#endif
-
-// Number of translation accesses in a single walk
-#ifndef PAGE_TABLE_LEAVES
-#define PAGE_TABLE_LEAVES 4
 #endif
 
 // Name of the log file
@@ -110,18 +105,6 @@ typedef struct FileHandle
 {
 	FILE* fp;
 } FileHandle;
-
-typedef struct MemRecord
-{
-	uint8_t header;
-	uint8_t access_rw;
-	uint16_t access_cpu;
-	uint32_t access_sz;
-	uint64_t vaddr;
-	uint64_t paddr;
-	uint64_t pte;
-	uint64_t leaves[PAGE_TABLE_LEAVES];
-} MemRecord;
 
 typedef struct InsRecord
 {
@@ -291,7 +274,6 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 					uint64_t vaddr, void *udata)
 {
 	MemRecord rec;
-	uint32_t discard;
 
     if (!should_do_logging()) {
         return;
@@ -302,14 +284,8 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	rec.access_cpu = cpu_index % MAX_CPU_COUNT; /* dummy field for now. introduced because of different QEMU version @jiyuan */
 	rec.access_sz = 1 << qemu_plugin_mem_size_shift(info);
 	rec.vaddr = vaddr;
-	rec.paddr = qemu_plugin_pa_by_va(vaddr,
-					&rec.leaves[0],
-					&rec.leaves[1],
-					&rec.leaves[2],
-					&rec.leaves[3],
-					&discard,
-					&rec.pte
-				);
+    rec.paddr = qemu_plugin_pa_by_va(vaddr,
+                                     (void *)&rec);
     // printf("Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx "
     //          "PTE3=%lx paddr=%lx access_rw=%d access_cpu=%d access_sz=%d\n",
     //          rec.vaddr, rec.leaves[0], rec.leaves[1], rec.leaves[2], rec.leaves[3],
@@ -404,16 +380,10 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	rec.access_cpu = cpu;
 	rec.access_sz = FRONTEND_FETCH_SIZE;
 	rec.vaddr = ins_line;
-	rec.paddr = qemu_plugin_pa_by_va(ins_line,
-					&rec.leaves[0],
-					&rec.leaves[1],
-					&rec.leaves[2],
-					&rec.leaves[3],
-					&cpu, // cpu is no longer used, so just reuse it here
-					&rec.pte
-				);
+    rec.paddr = qemu_plugin_pa_by_va(ins_line,
+                                     (void *)&rec);
 
-	write_ins_fetch(&rec);
+    write_ins_fetch(&rec);
 
 	if (BIN_RECORD_INCL_DECD)
 		vcpu_insn_exec(cpu_index, udata);

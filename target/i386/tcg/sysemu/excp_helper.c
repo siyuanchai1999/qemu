@@ -1445,14 +1445,14 @@ static int handle_mmu_fault(CPUState *cs, vaddr addr, int size,
 }
 
 unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
-                              int mmu_idx, unsigned long *cr3, unsigned long *pud,
-                                    unsigned long *pmd, unsigned long *pte,
-                                    unsigned int *page_size, unsigned long *entry) {
+                              int mmu_idx, void * trans_info) {
+
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
     int pg_mode;
     hwaddr paddr;
-
+    MemRecord * rec = (MemRecord *) trans_info;
+    unsigned int page_size = 0;
     if (!(env->cr[0] & CR0_PG_MASK)) {
         paddr = addr;
         if (!(env->hflags & HF_LMA_MASK)) {
@@ -1462,8 +1462,8 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
     } else {
         pg_mode = get_pg_mode(env);
         paddr = mmu_translate_pgtables(cs, addr, get_hphys, env->cr[3],
-                                   mmu_idx, pg_mode,
-                                   cr3, pud, pmd, pte, page_size, entry);
+                                       mmu_idx, pg_mode,
+                                       &rec->leaves[0], &rec->leaves[1], &rec->leaves[2], &rec->leaves[3], &page_size, &rec->pte);
     }
 
     return paddr;

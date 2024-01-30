@@ -44,9 +44,7 @@ bool x86_cpu_exec_interrupt(CPUState *cpu, int int_req);
 
 
 unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
-                              int mmu_idx, unsigned long *cr3, unsigned long *pud,
-                                    unsigned long *pmd, unsigned long *pte,
-                                    unsigned int *page_size, unsigned long *entry);
+                              int mmu_idx, void * trans_info);
 
 /* helper.c */
 bool x86_cpu_tlb_fill(CPUState *cs, vaddr address, int size,

@@ -131,4 +131,20 @@ static inline bool memop_big_endian(MemOp op)
     return (op & MO_BSWAP) == MO_BE;
 }
 
+
+#ifndef PAGE_TABLE_LEAVES
+#define PAGE_TABLE_LEAVES 4
+#endif
+typedef struct MemRecord
+{
+	uint8_t header;
+	uint8_t access_rw;
+	uint16_t access_cpu;
+	uint32_t access_sz;
+	uint64_t vaddr;
+	uint64_t paddr;
+	uint64_t pte;
+	uint64_t leaves[PAGE_TABLE_LEAVES];
+} MemRecord;
+
 #endif

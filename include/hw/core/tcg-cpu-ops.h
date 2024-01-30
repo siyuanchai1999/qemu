@@ -44,10 +44,9 @@ struct TCGCPUOps {
      * not return.  For user-only mode, always raise an exception
      * and do not return.
      */
+
     unsigned long (*tlb_fill_pgtables)(CPUState *cpu, vaddr addr, int size,
-                              int mmu_idx, unsigned long *cr3, unsigned long *pud,
-                                       unsigned long *pmd, unsigned long *pte,
-                                       unsigned int *page_size, unsigned long *entry);
+                                       int mmu_idx, void *trans_info);
     bool (*tlb_fill)(CPUState *cpu, vaddr address, int size,
                      MMUAccessType access_type, int mmu_idx,
                      bool probe, uintptr_t retaddr);
