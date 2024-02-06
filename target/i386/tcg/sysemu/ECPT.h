@@ -148,12 +148,12 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 #define ECPT_DESC_PA_TO_CR3_FORMAT(x)                                          \
 	(((x) << ECPT_DESC_SHIFT) | CR3_TRANSITION_BIT)
 
-#define ECPT_4K_WAY 2
-#define ECPT_2M_WAY 2
+#define ECPT_4K_WAY 3
+#define ECPT_2M_WAY 3
 #define ECPT_1G_WAY 0
 
-#define ECPT_4K_USER_WAY 2
-#define ECPT_2M_USER_WAY 2
+#define ECPT_4K_USER_WAY 3
+#define ECPT_2M_USER_WAY 3
 #define ECPT_1G_USER_WAY 0
 
 #define ECPT_KERNEL_WAY (ECPT_4K_WAY + ECPT_2M_WAY + ECPT_1G_WAY)
@@ -163,7 +163,7 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 
 #define ECPT_REHASH_WAY 3
 /* ECPT_TOTAL_WAY <= ECPT_MAX_WAY*/
-#define ECPT_MAX_WAY 12
+#define ECPT_MAX_WAY 24
 
 #if ECPT_MAX_WAY < ECPT_TOTAL_WAY + ECPT_REHASH_WAY 
 	#error "ECPT_MAX_WAY exceeded"

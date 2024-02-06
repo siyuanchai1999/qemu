@@ -496,8 +496,6 @@ retry:
                                 addr, way_found, entry_found_addr, pte_addr, pte,
                                 *pte_pointer, w, entry_addr, tolerable);
                     
-                    
-
                     if (!tolerable) {
                         assert(0);
                     }
@@ -1452,6 +1450,7 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
     int pg_mode;
     hwaddr paddr;
     MemRecord * rec = (MemRecord *) trans_info;
+
     unsigned int page_size = 0;
     if (!(env->cr[0] & CR0_PG_MASK)) {
         paddr = addr;
