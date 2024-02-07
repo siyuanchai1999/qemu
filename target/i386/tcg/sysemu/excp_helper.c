@@ -491,9 +491,9 @@ retry:
                 /* either found pte or pte_pointer has to be empty */
                 if (!(ecpt_pte_is_empty(pte))) {
                     tolerable = duplicated_pte_tolerable(addr, pte, gran_found, *pte_pointer, gran);
-                    warn_report("Duplicated entry! addr=%lx way_found=%x entry_found_addr=%lx pte_addr=%lx pte=%lx"
+                    warn_report("Duplicated entry! pc=%lx addr=%lx way_found=%x entry_found_addr=%lx pte_addr=%lx pte=%lx"
                                 " *pte_pointer=%lx cur_way=%x cur_entry_addr=%lx tolerable=%d\n",
-                                addr, way_found, entry_found_addr, pte_addr, pte,
+                                env->eip, addr, way_found, entry_found_addr, pte_addr, pte,
                                 *pte_pointer, w, entry_addr, tolerable);
                     
                     if (!tolerable) {
@@ -723,7 +723,7 @@ static int mmu_translate_2M_basic(CPUState *cs, hwaddr addr, MMUTranslateFunc ge
      *  TODO:
      *      translation only for 2MB right now
      */
-    uint64_t size = GET_HPT_SIZE(cr3);
+    uint64_t size = GET_HPT_SIZE_OLD(cr3);
     uint64_t hash = gen_hash(VADDR_TO_PAGE_NUM_NO_CLUSTER_2MB(addr) , size);
     
     hwaddr pte_addr = GET_HPT_BASE(cr3)                /* page table base */

@@ -129,12 +129,27 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 // #define PAGE_NUM_TO_ADDR_1GB(x)   (SHIFT_TO_ADDR_1GB(x) << (ECPT_CLUSTER_NBITS))
 
 #define HPT_SIZE_MASK (0xfff)      	/* 16 * cr3[0:11] for number of entries */
-#define HPT_SIZE_HIDDEN_BITS (4)    
+// #define HPT_SIZE_HIDDEN_BITS (4)    
 // #define HPT_CR3_TO_NUM_ENTRIES(cr3) ((((uint64_t) cr3 ) & HPT_SIZE_MASK) << HPT_SIZE_HIDDEN_BITS)
-#define HPT_NUM_ENTRIES_TO_CR3(size) (((uint64_t) cr3 ) >> HPT_SIZE_HIDDEN_BITS)
+// #define HPT_NUM_ENTRIES_TO_CR3(size) (((uint64_t) cr3 ) >> HPT_SIZE_HIDDEN_BITS)
 // #define HPT_REHASH_PTR_MASK (0xfff0000000000000UL)
+
+#define GET_HPT_SIZE_OLD(cr3) ((((uint64_t) cr3) & HPT_SIZE_MASK ) << 4)
+
+
+#define LOG_1(n) (((n) >= 1ULL << 1) ? 1 : 0)
+#define LOG_2(n) (((n) >= 1ULL << 2) ? (2 + LOG_1((n) >> 2)) : LOG_1(n))
+#define LOG_4(n) (((n) >= 1ULL << 4) ? (4 + LOG_2((n) >> 4)) : LOG_2(n))
+#define LOG_8(n) (((n) >= 1ULL << 8) ? (8 + LOG_4((n) >> 8)) : LOG_4(n))
+#define LOG_16(n) (((n) >= 1ULL << 16) ? (16 + LOG_8((n) >> 16)) : LOG_8(n))
+#define LOG_32(n) (((n) >= 1ULL << 32) ? (32 + LOG_16((n) >> 32)) : LOG_16(n))
+#define LOG(n) LOG_32(n)
+
+#define GET_HPT_SIZE(cr3) ( (((uint64_t) cr3) & HPT_SIZE_MASK) ? 1ULL << (((uint64_t) cr3) & HPT_SIZE_MASK) : 0)
+#define HPT_NUM_ENTRIES_TO_CR3(size) (LOG(size))
+
+
 #define HPT_BASE_MASK (0x000ffffffffff000UL)
-#define GET_HPT_SIZE(cr3) ((((uint64_t) cr3) & HPT_SIZE_MASK ) << HPT_SIZE_HIDDEN_BITS)
 #define GET_HPT_BASE(cr3) (((uint64_t) cr3) & HPT_BASE_MASK )
 // #define GET_HPT_REHASH_PTR(cr3) ((((uint64_t) cr3) & HPT_REHASH_PTR_MASK ) >> (52 - HPT_SIZE_HIDDEN_BITS))
 
