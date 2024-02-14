@@ -336,6 +336,15 @@ static bool duplicated_pte_tolerable(hwaddr vaddr, uint64_t old_pte,
     return true;
 }
 
+static uint64_t get_rehash_ptr(CPUX86State *env, int way)
+{
+    if (way < 0 || way > ECPT_TOTAL_WAY) {
+        warn_report("get_rehash_ptr: Invalid way %d\n", way);
+        return 0;
+    }
+    return env->ecpt_rehash_msr[way];
+}
+
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
                          hwaddr *xlat, int *page_size, int *prot)
@@ -446,7 +455,8 @@ retry:
 		hash = gen_hash64(vpn, size, w);
 		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d ECPT_TOTAL_WAY=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, ECPT_TOTAL_WAY, hash, vpn, size);
 
-        rehash_ptr = GET_HPT_REHASH_PTR(cr);
+        // rehash_ptr = GET_HPT_REHASH_PTR(cr);
+        rehash_ptr = get_rehash_ptr(env, w);
 
         if (hash < rehash_ptr) {
             /* not supported for resizing now */

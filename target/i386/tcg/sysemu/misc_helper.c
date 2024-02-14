@@ -327,6 +327,15 @@ void helper_wrmsr(CPUX86State *env)
             break;
         }
 
+        if ((uint32_t)env->regs[R_ECX] >= MSR_ECPT_REHASH_START && (uint32_t)env->regs[R_ECX] < MSR_ECPT_REHASH_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_ECPT_REHASH_START;
+            env->ecpt_rehash_msr[offset] = val;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "write ecpt_rehash_msr[%d]=%lx\n", offset, env->ecpt_rehash_msr[offset]);
+            break;
+        }
+
+
         if ((uint32_t)env->regs[R_ECX] >= MSR_CWT_START && (uint32_t)env->regs[R_ECX] < MSR_CWT_END) {
             uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_CWT_START;
             env->cwt_msr[offset] = val;
@@ -513,6 +522,16 @@ void helper_rdmsr(CPUX86State *env)
                             " read ecpt_msr[%d]=%lx\n", offset, val);
             break;
         }
+
+
+        if ((uint32_t)env->regs[R_ECX] >= MSR_ECPT_REHASH_START && (uint32_t)env->regs[R_ECX] < MSR_ECPT_REHASH_END) {
+            uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_ECPT_REHASH_START;
+            val = env->ecpt_rehash_msr[offset];
+            qemu_log_mask(CPU_LOG_MMU,
+                            " read ecpt_rehash_msr[%d]=%lx\n", offset, val);
+            break;
+        }
+
 
         if ((uint32_t)env->regs[R_ECX] >= MSR_CWT_START && (uint32_t)env->regs[R_ECX] < MSR_CWT_END) {
             uint32_t offset = (uint32_t)env->regs[R_ECX] - MSR_CWT_START;

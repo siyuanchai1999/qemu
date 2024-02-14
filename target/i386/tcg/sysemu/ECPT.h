@@ -184,13 +184,6 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 	#error "ECPT_MAX_WAY exceeded"
 #endif
 
-#define HPT_REHASH_SHIFT (53)
-#define REHASH_MASK (~((1ULL << HPT_REHASH_SHIFT) - 1))
-#define GET_HPT_REHASH_PTR(cr) GET_HPT_SIZE(((uint64_t) cr) >> HPT_REHASH_SHIFT)
-
-#define REHASH_PTR_MAX (1 << (64 - HPT_REHASH_SHIFT))
-#define REHASH_PTR_TO_CR(ptr) (((uint64_t) ptr) << HPT_REHASH_SHIFT)
-#define GET_CR_WITHOUT_REHASH(cr) (cr & (~REHASH_MASK))
 
 /**
  *  
