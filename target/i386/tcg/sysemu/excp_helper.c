@@ -247,9 +247,51 @@ typedef struct hit_info {
     bool pmd_hit;
 } hit_info_t;
 
+static inline void fill_4K_ways_range(bool is_kernel, int * possible_ways, int * n_ways)
+{
+    if (is_kernel) {
+        fill_ways_range(ECPT_4K_WAY_START, ECPT_4K_WAY_END, possible_ways, *n_ways, n_ways);
+    } else {
+        fill_ways_range(ECPT_4K_USER_WAY_START, ECPT_4K_USER_WAY_END, possible_ways, *n_ways, n_ways);
+    } 
+}
+
+static inline void fill_2M_ways_range(bool is_kernel, int * possible_ways, int * n_ways)
+{
+    if (is_kernel) {
+        fill_ways_range(ECPT_2M_WAY_START, ECPT_2M_WAY_END, possible_ways, *n_ways, n_ways);
+    } else {
+        fill_ways_range(ECPT_2M_USER_WAY_START, ECPT_2M_USER_WAY_END, possible_ways, *n_ways, n_ways);
+    } 
+}
+
+static inline hit_info_t cwc_fill_finish_helper(hit_info_t hit_res, hwaddr addr, cwt_header_t pud_cwc_res, cwt_header_t pmd_cwc_res, int *possible_ways, int *n_ways)
+{
+
+    QEMU_LOG_TRANSLATE(
+            0, CPU_LOG_MMU,
+            "CWC LOAD: addr=%lx"
+            " pud_hit=%d (p1G=%d, p2M=%d, p4K=%d, rel_way=%d), pmd_hit=%d (p2M=%d, p4K=%d, rel_way=%d)\n",
+                addr, hit_res.pud_hit,
+                pud_cwc_res.present_1GB, pud_cwc_res.present_2MB,
+                pud_cwc_res.present_4KB, pud_cwc_res.way_in_ecpt,
+                hit_res.pmd_hit,
+                pmd_cwc_res.present_2MB, pmd_cwc_res.present_4KB, pmd_cwc_res.way_in_ecpt);
+        
+    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "CWC LOAD: ways=[ ");
+    
+    for (int i = 0; i < *n_ways; i++) {
+        QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "%d ", possible_ways[i]);
+    }
+    
+    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "]\n");
+
+    return hit_res;
+}
+
 static hit_info_t fill_from_cwc(CPUState *cs, hwaddr addr, int *possible_ways, int *n_ways)
 {
-    cwt_header_t pud_cwc_res;
+    cwt_header_t pud_cwc_res = {}, pmd_cwc_res = {};
     bool pud_hit = cwc_lookup(&cwc_pud, addr, CWT_1GB, &pud_cwc_res);
     
     X86CPU *cpu = X86_CPU(cs);
@@ -263,56 +305,46 @@ static hit_info_t fill_from_cwc(CPUState *cs, hwaddr addr, int *possible_ways, i
         if (pud_cwc_res.present_1GB) {
             uint32_t abs_way = relative_way_to_absolute_way(pud_cwc_res.way_in_ecpt, is_kernel, page_1GB);
             fill_ways_range(abs_way, abs_way + 1, possible_ways, 0, n_ways);
+            return cwc_fill_finish_helper(hit_res, addr, pud_cwc_res, pmd_cwc_res, possible_ways, n_ways);
         } 
         
-        if (pud_cwc_res.present_2MB) {
-            if (is_kernel) {
-                fill_ways_range(ECPT_2M_WAY_START, ECPT_2M_WAY_END, possible_ways, *n_ways, n_ways);
-            } else {
-                fill_ways_range(ECPT_2M_USER_WAY_START, ECPT_2M_USER_WAY_END, possible_ways, *n_ways, n_ways);
-            }
+        /* PUD 4K only */
+        if (!!pud_cwc_res.present_4KB && !pud_cwc_res.present_2MB) {
+            fill_4K_ways_range(is_kernel, possible_ways, n_ways);
+            return cwc_fill_finish_helper(hit_res, addr, pud_cwc_res, pmd_cwc_res, possible_ways, n_ways);
         }
         
-        if (pud_cwc_res.present_4KB) {
-            if (is_kernel) {
-                fill_ways_range(ECPT_4K_WAY_START, ECPT_4K_WAY_END, possible_ways, *n_ways, n_ways);
-            } else {
-                fill_ways_range(ECPT_4K_USER_WAY_START, ECPT_4K_USER_WAY_END, possible_ways, *n_ways, n_ways);
-            }   
-        }
+    } 
 
-        if (*n_ways == 0) {
-            QEMU_LOG_TRANSLATE(
-            0, CPU_LOG_MMU,
-            "CWC load HIT: addr=%" VADDR_PRIx
-            " ways=[ --- ] (p1G=%d, p2M=%d, p4K=%d, rel_way=%d)\n",
-                addr,
-                pud_cwc_res.present_1GB, pud_cwc_res.present_2MB,
-                pud_cwc_res.present_4KB, pud_cwc_res.way_in_ecpt);
-        } else {
-            QEMU_LOG_TRANSLATE(
-            0, CPU_LOG_MMU,
-            "CWC load HIT: addr=%" VADDR_PRIx
-            " ways=[%d - %d] (p1G=%d, p2M=%d, p4K=%d, rel_way=%d)\n",
-                addr, possible_ways[0], possible_ways[*n_ways - 1],
-                pud_cwc_res.present_1GB, pud_cwc_res.present_2MB,
-                pud_cwc_res.present_4KB, pud_cwc_res.way_in_ecpt);
+    bool pmd_hit = cwc_lookup(&cwc_pmd, addr, CWT_2MB, &pmd_cwc_res);
+    hit_res.pmd_hit = pmd_hit;
+
+    if (pmd_hit) {
+        if (pmd_cwc_res.present_2MB) {
+            uint32_t abs_way = relative_way_to_absolute_way(pmd_cwc_res.way_in_ecpt, is_kernel, page_2MB);
+            fill_ways_range(abs_way, abs_way + 1, possible_ways, 0, n_ways);
         }
         
+        if (pmd_cwc_res.present_4KB) {
+            fill_4K_ways_range(is_kernel, possible_ways, n_ways);
+        }
     } else {
-        
-        QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "CWC load MISS: addr=%" VADDR_PRIx "\n", addr);
+        if (pud_hit && pud_cwc_res.present_2MB) {
+            fill_2M_ways_range(is_kernel, possible_ways, n_ways);
+        }
 
-        // fetch_from_cwt(cs, &cwc_pud, addr, CWT_1GB);
+        if (pud_hit && pud_cwc_res.present_4KB) {
+            fill_4K_ways_range(is_kernel, possible_ways, n_ways);
+        }
     }
 
-    return hit_res;
+    return cwc_fill_finish_helper(hit_res, addr, pud_cwc_res, pmd_cwc_res, possible_ways, n_ways);
 }
 
 static void fix_cwc_from_cwt(CPUState *cs, hwaddr addr, hit_info_t hit_res)
 {
     fetch_from_cwt(cs, &cwc_pud, addr, CWT_1GB, hit_res.pud_hit);
-
+    fetch_from_cwt(cs, &cwc_pmd, addr, CWT_2MB, hit_res.pmd_hit);
     /* TODO: add pmd */
 }
 

@@ -257,7 +257,7 @@ int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularit
 		load_helper(cs, (void *) &cwt_entry, cwt_entry_addr, sizeof(cwt_entry_t));
 
 		QEMU_LOG_TRANSLATE(
-			"\tCWT: load from 0x%016lx base at 0x%016lx entry_vpn=%lx valid_num=%d\n",
+			"\tCWT: base at 0x%016lx load from 0x%016lx entry_vpn=%lx valid_num=%d\n",
 			(uint64_t)cwt_base, (uint64_t)cwt_entry_addr, cwt_entry_get_vpn(&cwt_entry), cwt_entry_get_valid_header_num(&cwt_entry));
 
 		if (cwt_entry_match_vpn(&cwt_entry, vpn) && cwt_entry_get_valid_header_num(&cwt_entry) > 0) {
@@ -289,7 +289,7 @@ static inline void print_cwt_entries(cwc_cache_t * cwc)
 		cwt_entry_t * entry = &cwc->entries[i];
 		memcpy(&entry_start[0], entry,   sizeof(cwt_entry_t) );
 
-		QEMU_LOG_TRANSLATE("CWT: entry[%d] vpn=%lx valid_num=%d\n (%016lx %016lx %016lx %016lx %016lx %016lx %016lx %016lx) \n",
+		QEMU_LOG_TRANSLATE("CWC: entry[%d] vpn=%lx valid_num=%d\n (%016lx %016lx %016lx %016lx %016lx %016lx %016lx %016lx) \n",
 			i, cwt_entry_get_vpn(entry), cwt_entry_get_valid_header_num(entry),
 			entry_start[0], entry_start[1], entry_start[2], entry_start[3], entry_start[4], entry_start[5], entry_start[6], entry_start[7]);
 	}
@@ -304,7 +304,7 @@ bool cwc_lookup(cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, cwt_heade
 	unsigned int idx = 0;
 	cwt_header_t empty_header = {0};
 
-	print_cwt_entries(cwc);
+	// print_cwt_entries(cwc);
 
 	for (int i = 0; i < cwc->capacity; i++) {
 		entry_valid_num = cwt_entry_get_valid_header_num(&cwc->entries[i]);
@@ -322,6 +322,9 @@ bool cwc_lookup(cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, cwt_heade
 			// return cwc->entries[i].sec_headers[idx];
 		}
 	}
+
+	QEMU_LOG_TRANSLATE(
+				"\t CWC: NO load vpn=%lx \n", vpn);
 
 	*res = empty_header;
 	return false;
