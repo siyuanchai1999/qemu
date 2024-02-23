@@ -25,6 +25,7 @@
 #include "excp_helper.h"
 #include "ECPT_hash.h"
 #include "ECPT.h"
+#include "ECPT_utils.h"
 
 #include "build/x86_64-softmmu-config-target.h"
 #include <assert.h>
@@ -121,7 +122,8 @@ struct hash_combinator {
 	uint32_t way;
 } __attribute__((__packed__));
 
-static uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) {
+uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) 
+{
 #ifdef TARGET_X86_64_ECPT_CRC64
     // uint64_t hash = crc_64_multi_hash(vpn, size, way);
     uint64_t hash = ecpt_crc64_hash(vpn, way);
@@ -145,7 +147,7 @@ static uint64_t gen_hash64(uint64_t vpn, uint64_t size, uint32_t way) {
     return hash;
 }
 
-static void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
+void load_helper(CPUState *cs, void * entry, hwaddr addr, int size) {
 	int32_t loaded = 0;
 	int32_t needed = size;
 	
@@ -188,13 +190,6 @@ static inline hwaddr get_pte_addr(hwaddr entry_addr, ecpt_entry_t * entry_p, uin
     return entry_addr + (uint64_t) (((void *) pte_p) - ((void *) entry_p));
 }
 
-// static cwt_entry_t cwc_pud[CWC_PUD_SIZE] = {};
-// static cwt_entry_t cwc_pmd[CWC_PMD_SIZE] = {};
-
-static inline bool is_kernel_addr(CPUX86State *env, hwaddr addr) 
-{
-    return addr >= env->kernel_start;
-}
 
 static void fill_ways_range(int way_start, int way_end, int * possible_ways, int cur_pos, int * n_ways)
 {
@@ -221,41 +216,134 @@ static inline void fill_all_ways(int * possible_ways, int * n_ways)
     fill_ways_range(0, ECPT_TOTAL_WAY, possible_ways, 0, n_ways);
 }
 
-
-static inline void fill_from_cwc(int * possible_ways, int * n_ways)
+static uint32_t relative_way_to_absolute_way(int relative_way, bool is_kernel, enum Granularity gran)
 {
-
+    if (is_kernel) {
+        if (gran == page_4KB) {
+            return ECPT_4K_WAY_START + relative_way;
+        } else if (gran == page_2MB) {
+            return ECPT_2M_WAY_START + relative_way;
+        } else if (gran == page_1GB) {
+            return ECPT_1G_WAY_START + relative_way;
+        } else {
+            assert(0);
+        }
+    } else {
+        if (gran == page_4KB) {
+            return ECPT_4K_USER_WAY_START + relative_way;
+        } else if (gran == page_2MB) {
+            return ECPT_2M_USER_WAY_START + relative_way;
+        } else if (gran == page_1GB) {
+            return ECPT_1G_USER_WAY_START + relative_way;
+        } else {
+            assert(0);
+        }
+    }
+    return 0; 
 }
+
+typedef struct hit_info {
+    bool pud_hit;
+    bool pmd_hit;
+} hit_info_t;
+
+static hit_info_t fill_from_cwc(CPUState *cs, hwaddr addr, int *possible_ways, int *n_ways)
+{
+    cwt_header_t pud_cwc_res;
+    bool pud_hit = cwc_lookup(&cwc_pud, addr, CWT_1GB, &pud_cwc_res);
+    
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+    bool is_kernel = is_kernel_addr(env, addr);
+
+    hit_info_t hit_res = {};
+    hit_res.pud_hit = pud_hit;
+
+    if (pud_hit) {
+        if (pud_cwc_res.present_1GB) {
+            uint32_t abs_way = relative_way_to_absolute_way(pud_cwc_res.way_in_ecpt, is_kernel, page_1GB);
+            fill_ways_range(abs_way, abs_way + 1, possible_ways, 0, n_ways);
+        } 
+        
+        if (pud_cwc_res.present_2MB) {
+            if (is_kernel) {
+                fill_ways_range(ECPT_2M_WAY_START, ECPT_2M_WAY_END, possible_ways, *n_ways, n_ways);
+            } else {
+                fill_ways_range(ECPT_2M_USER_WAY_START, ECPT_2M_USER_WAY_END, possible_ways, *n_ways, n_ways);
+            }
+        }
+        
+        if (pud_cwc_res.present_4KB) {
+            if (is_kernel) {
+                fill_ways_range(ECPT_4K_WAY_START, ECPT_4K_WAY_END, possible_ways, *n_ways, n_ways);
+            } else {
+                fill_ways_range(ECPT_4K_USER_WAY_START, ECPT_4K_USER_WAY_END, possible_ways, *n_ways, n_ways);
+            }   
+        }
+
+        if (*n_ways == 0) {
+            QEMU_LOG_TRANSLATE(
+            0, CPU_LOG_MMU,
+            "CWC load HIT: addr=%" VADDR_PRIx
+            " ways=[ --- ] (p1G=%d, p2M=%d, p4K=%d, rel_way=%d)\n",
+                addr,
+                pud_cwc_res.present_1GB, pud_cwc_res.present_2MB,
+                pud_cwc_res.present_4KB, pud_cwc_res.way_in_ecpt);
+        } else {
+            QEMU_LOG_TRANSLATE(
+            0, CPU_LOG_MMU,
+            "CWC load HIT: addr=%" VADDR_PRIx
+            " ways=[%d - %d] (p1G=%d, p2M=%d, p4K=%d, rel_way=%d)\n",
+                addr, possible_ways[0], possible_ways[*n_ways - 1],
+                pud_cwc_res.present_1GB, pud_cwc_res.present_2MB,
+                pud_cwc_res.present_4KB, pud_cwc_res.way_in_ecpt);
+        }
+        
+    } else {
+        
+        QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "CWC load MISS: addr=%" VADDR_PRIx "\n", addr);
+
+        // fetch_from_cwt(cs, &cwc_pud, addr, CWT_1GB);
+    }
+
+    return hit_res;
+}
+
+static void fix_cwc_from_cwt(CPUState *cs, hwaddr addr, hit_info_t hit_res)
+{
+    fetch_from_cwt(cs, &cwc_pud, addr, CWT_1GB, hit_res.pud_hit);
+
+    /* TODO: add pmd */
+}
+
 /* consume addr and CWC to get which way in ECPT to query 
     possible_ways will be filled. n_ways indicate its size.
     start and end indicate the range of ways to be filled.
 */
-static bool get_ECPT_ways(CPUX86State *env, hwaddr addr, int * possible_ways, int * n_ways)
+static bool get_ECPT_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * n_ways, hit_info_t hit_res)
 {
+    X86CPU *cpu = X86_CPU(cs);
+    CPUX86State *env = &cpu->env;
+
     if (is_kernel_addr(env, addr)) {
         
-        if (*n_ways == 0) {
-            fill_all_kernel_ways(possible_ways, n_ways);  
-            /* TODO fill from CWC */
-            // fill_from_cwc(possible_ways, n_ways);
-        } else if (*n_ways < ECPT_KERNEL_WAY) {
+        if (*n_ways < ECPT_KERNEL_WAY) {
             /* CWC fails to cover all ways*/
-            /* TODO: optimize this by only querying the remaining ways */
-            fill_all_kernel_ways(possible_ways, n_ways);  
+            /* TODO: optimize this by only querying the remaining ways  */
+            fill_all_kernel_ways(possible_ways, n_ways); 
+            fix_cwc_from_cwt(cs, addr, hit_res); 
         } else {
-            /* cannot query more ways */
+            /* cannot query more ways. Things not in page table */
             return false;                                                                                 
         }
     } else {
-        if (*n_ways == 0) {
-            /* TODO fill from CWC */
-            fill_all_user_ways(possible_ways, n_ways);
-        } else if (*n_ways < ECPT_USER_WAY) {
+        if (*n_ways < ECPT_USER_WAY) {
             /* CWC fails to cover all ways*/
             /* TODO: optimize this by only querying the remaining ways */
             fill_all_user_ways(possible_ways, n_ways);  
+            fix_cwc_from_cwt(cs, addr, hit_res);
         } else {
-            /* shouldn't be here */
+            /* cannot query more ways. Things not in page table */
             return false;   
         }
     }
@@ -397,8 +485,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     int n_ways = 0;
     bool new_way_filled = false;
 
-    get_ECPT_ways(env, addr, possible_ways, &n_ways);
-
+    // get_ECPT_ways(cs, addr, possible_ways, &n_ways);
+    hit_info_t hit_res = fill_from_cwc(cs, addr, possible_ways, &n_ways);
 retry:
 
     pte = 0;
@@ -559,7 +647,7 @@ retry:
         way_found = -1;
 
         /* Try to fix it with new ways */
-        new_way_filled = get_ECPT_ways(env, addr, possible_ways, &n_ways);
+        new_way_filled = get_ECPT_ways(cs, addr, possible_ways, &n_ways, hit_res);
         if (new_way_filled){
             goto retry;
         }

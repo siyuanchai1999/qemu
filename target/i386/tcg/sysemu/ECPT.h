@@ -176,6 +176,20 @@ enum Granularity {page_4KB, page_2MB, page_1GB};
 
 #define ECPT_TOTAL_WAY (ECPT_KERNEL_WAY + ECPT_USER_WAY)
 
+#define ECPT_4K_WAY_START 0
+#define ECPT_4K_WAY_END (ECPT_4K_WAY_START + ECPT_4K_WAY)
+#define ECPT_2M_WAY_START (ECPT_4K_WAY_START + ECPT_4K_WAY)
+#define ECPT_2M_WAY_END (ECPT_2M_WAY_START + ECPT_2M_WAY)
+#define ECPT_1G_WAY_START (ECPT_2M_WAY_START + ECPT_2M_WAY)
+#define ECPT_1G_WAY_END (ECPT_1G_WAY_START + ECPT_1G_WAY)
+
+#define ECPT_4K_USER_WAY_START (ECPT_KERNEL_WAY)
+#define ECPT_4K_USER_WAY_END (ECPT_4K_USER_WAY_START + ECPT_4K_USER_WAY)
+#define ECPT_2M_USER_WAY_START (ECPT_4K_USER_WAY_START + ECPT_4K_USER_WAY)
+#define ECPT_2M_USER_WAY_END (ECPT_2M_USER_WAY_START + ECPT_2M_USER_WAY)
+#define ECPT_1G_USER_WAY_START (ECPT_2M_USER_WAY_START + ECPT_2M_USER_WAY)
+#define ECPT_1G_USER_WAY_END (ECPT_1G_USER_WAY_START + ECPT_1G_USER_WAY)
+
 #define ECPT_REHASH_WAY 3
 /* ECPT_TOTAL_WAY <= ECPT_MAX_WAY*/
 #define ECPT_MAX_WAY 24
@@ -312,6 +326,8 @@ uint32_t find_rehash_way(uint32_t way);
         (CWT_2MB_KERNEL_N_WAY + CWT_1GB_KERNEL_N_WAY + CWT_2MB_USER_N_WAY +    \
          CWT_1GB_USER_N_WAY)
 
+#define CWT_KERNEL_WAY (CWT_2MB_KERNEL_N_WAY + CWT_1GB_KERNEL_N_WAY)
+
 #define CWT_MAX_WAY 10
 #if CWT_MAX_WAY < CWT_TOTAL_N_WAY
 #error "CWT_MAX_WAY exceeded"
@@ -339,5 +355,75 @@ typedef struct cwt_entry {
 
 #define CWC_PUD_SIZE 2
 #define CWC_PMD_SIZE 16
+
+typedef enum {
+	CWT_2MB,
+	CWT_1GB
+} CWTGranularity; 
+
+typedef struct cwc_cache {
+	uint32_t capacity;
+	uint64_t accesses;
+    uint64_t misses;
+
+	uint64_t lru_gen_counter;
+	uint64_t *lru_priorities;
+	cwt_entry_t *entries;
+} cwc_cache_t;
+
+extern cwc_cache_t cwc_pud;
+extern cwc_cache_t cwc_pmd;
+
+#define CWT_VPN_2MB_BITS 18
+#define CWT_VPN_1GB_BITS 9
+#define CWT_CLUSTER_NBITS 6
+
+#define CWT_HEADER_BITS 5
+#define CWT_VPN_BITS_PER_BYTE 3
+#define ECPT_CLUSTER_FACTOR (1 << ECPT_CLUSTER_NBITS)
+
+
+#define CWT_N_BYTES_FOR_VPN \
+    ((MAX(CWT_VPN_2MB_BITS, CWT_VPN_1GB_BITS) + (CWT_VPN_BITS_PER_BYTE - 1)) / CWT_VPN_BITS_PER_BYTE)
+
+/* utilize vpn bits of  */
+#define CWT_N_SECTION_VALID_NUM_START 61 
+#define CWT_N_SECTION_VALID_NUM_LEN 3
+#define CWT_VALID_NUM_BITS_PER_BYTE 3
+
+#if CWT_N_SECTION_VALID_NUM_START + CWT_N_SECTION_VALID_NUM_LEN > CWT_N_SECTION_HEADERS
+    #error Wrong Config of CWT_N_SECTION_VALID_NUM_START/END
+#endif
+
+#define VADDR_TO_CWT_VPN_2MB(x)  (VADDR_TO_PAGE_NUM_2MB(x) >> CWT_CLUSTER_NBITS)
+#define VADDR_TO_CWT_VPN_1GB(x)  (VADDR_TO_PAGE_NUM_1GB(x) >> CWT_CLUSTER_NBITS)
+
+#define CWT_SECTION_HEADERS_IDX_MASK (CWT_N_SECTION_HEADERS - 1)
+#define VADDR_TO_CWT_2M_HEADER_IDX(x) (VADDR_TO_PAGE_NUM_2MB(x) & CWT_SECTION_HEADERS_IDX_MASK)
+#define VADDR_TO_CWT_1G_HEADER_IDX(x) (VADDR_TO_PAGE_NUM_1GB(x) & CWT_SECTION_HEADERS_IDX_MASK)
+
+
+/**
+ * @brief cwc lookup, return true if found, false otherwise.
+ * 	Function obeys CWC LRU rule.
+ * @param cwc cwc cache
+ * @param vaddr vaddr to lookup
+ * @param gran CWT granularity (2MB or 1GB)
+ * @param res result header
+ * @return true 
+ * @return false 
+ */
+bool cwc_lookup(cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, cwt_header_t * res);
+
+/**
+ * @brief fetch CWT entry into CWC. Replace last recently used entry.
+ * 	CWT lookup involves a cuckoo hash lookup.
+ *  return 0 if found, -1 otherwise.
+ * @param cs CPUState
+ * @param cwc CWC cache
+ * @param vaddr vaddr to fetch
+ * @param gran CWT granularity (2MB or 1GB)
+ */
+int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, bool cwc_stale);
 
 #endif /* ECPT_H */
