@@ -13,7 +13,7 @@
 #define MEMOP_H
 
 #include "qemu/host-utils.h"
-
+// #include "build/x86_64-softmmu-config-target.h"
 typedef enum MemOp {
     MO_8     = 0,
     MO_16    = 1,
@@ -132,6 +132,11 @@ static inline bool memop_big_endian(MemOp op)
 }
 
 
+// #ifdef TARGET_X86_64_ECPT
+// #define PAGE_TABLE_LEAVES 12
+// #endif
+/* TODO fix this define */
+#define PAGE_TABLE_LEAVES 12
 #ifndef PAGE_TABLE_LEAVES
 #define PAGE_TABLE_LEAVES 4
 #endif

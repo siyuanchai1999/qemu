@@ -273,7 +273,7 @@ static int should_do_logging(void)
 static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 					uint64_t vaddr, void *udata)
 {
-	MemRecord rec;
+	MemRecord rec = { 0 };
 
     if (!should_do_logging()) {
         return;
@@ -359,7 +359,7 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
 	uint64_t ins_pc = (uint64_t) udata;
     uint64_t ins_line = ins_pc & FRONTEND_FETCH_MASK;
-    MemRecord rec;
+    MemRecord rec = { 0 };
 
     if (!should_do_logging()) {
         return;

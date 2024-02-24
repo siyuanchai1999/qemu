@@ -467,7 +467,7 @@ static uint64_t get_rehash_ptr(CPUX86State *env, int way)
 
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
-                         hwaddr *xlat, int *page_size, int *prot)
+                         hwaddr *xlat, int *page_size, int *prot, MemRecord * rec)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
@@ -573,7 +573,7 @@ retry:
         }
 
 		hash = gen_hash64(vpn, size, w);
-		QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d ECPT_TOTAL_WAY=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, ECPT_TOTAL_WAY, hash, vpn, size);
+		// QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: w=%d ECPT_TOTAL_WAY=%d hash=0x%lx vpn =0x%lx size=0x%lx\n",w, ECPT_TOTAL_WAY, hash, vpn, size);
 
         // rehash_ptr = GET_HPT_REHASH_PTR(cr);
         rehash_ptr = get_rehash_ptr(env, w);
@@ -592,8 +592,8 @@ retry:
             // qemu_log("    Translate: Elastic addr=%lx w=%d hash=0x%lx rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx \n",
             //     addr, w, hash, rehash_way, rehash_hash, vpn, rehash_size);
 
-            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
-                rehash_way, rehash_hash, vpn, rehash_size);
+            // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: Elastic rehash_way=%ld rehash_hash=0x%lx vpn =0x%lx rehash_size=0x%lx\n",
+                // rehash_way, rehash_hash, vpn, rehash_size);
 
             ecpt_base = (ecpt_entry_t * ) GET_HPT_BASE(rehash_cr);
             entry_addr = (uint64_t) &ecpt_base[rehash_hash];
@@ -604,14 +604,19 @@ retry:
             entry_addr = (uint64_t) &ecpt_base[hash];
         }
         
-        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx base at 0x%016lx\n", entry_addr, (uint64_t) ecpt_base);
+        // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Translate: load from 0x%016lx base at 0x%016lx\n", entry_addr, (uint64_t) ecpt_base);
 
          /* do nothing for now, cuz nested paging is not enabled */
         entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
         
+        if (rec) {
+            assert(w < PAGE_TABLE_LEAVES);
+            rec->leaves[w] = entry_addr;
+        }
+
         load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
         
-        PRINT_ECPT_ENTRY((&entry));
+        // PRINT_ECPT_ENTRY((&entry));
 
         if (ecpt_entry_match_vpn(&entry, vpn)) {
             /* found */
@@ -796,9 +801,15 @@ retry:
     }
     
     paddr = PTE_TO_PADDR(pte);
+    if (rec) {
+        rec->pte = pte;
+    }
     paddr += page_offset;
     // pte = pte & PG_ADDRESS_MASK;
     *xlat = GET_HPHYS(cs, paddr, is_write1, prot);
+    if (rec) {
+        rec->paddr = *xlat;
+    }
     return PG_ERROR_OK;
 
  do_fault_rsvd:
@@ -995,7 +1006,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
     int after_transition = !!(cr3 & CR3_TRANSITION_BIT);
 
     if (after_transition) {
-        return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
+        return mmu_translate_ECPT(cs, addr, get_hphys_func, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot, NULL);
     } else {
         return mmu_translate_2M_basic(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
     }
@@ -1580,8 +1591,8 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
     int pg_mode;
     hwaddr paddr;
     MemRecord * rec = (MemRecord *) trans_info;
+    int prot;
 
-    unsigned int page_size = 0;
     if (!(env->cr[0] & CR0_PG_MASK)) {
         paddr = addr;
         if (!(env->hflags & HF_LMA_MASK)) {
@@ -1590,9 +1601,24 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
         }
     } else {
         pg_mode = get_pg_mode(env);
-        paddr = mmu_translate_pgtables(cs, addr, get_hphys, env->cr[3],
+#ifdef TARGET_X86_64_ECPT
+    /* fill  */
+    int page_size = 0;
+    int error_code =
+        mmu_translate_ECPT(cs, addr, get_hphys, MMU_DATA_LOAD, mmu_idx, pg_mode,
+                           0, &paddr, &page_size, &prot, rec);
+    
+    if (error_code != PG_ERROR_OK) {
+        warn_report("ECPT fill pgtable failure: addr=%lx eip=%lx error_code=%d\n", addr, env->eip, error_code);
+    }
+    return paddr;
+#else
+    /* radix */
+    unsigned int page_size = 0;
+    paddr = mmu_translate_pgtables(cs, addr, get_hphys, env->cr[3],
                                        mmu_idx, pg_mode,
                                        &rec->leaves[0], &rec->leaves[1], &rec->leaves[2], &rec->leaves[3], &page_size, &rec->pte);
+#endif
     }
 
     return paddr;
