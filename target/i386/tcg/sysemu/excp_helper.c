@@ -528,9 +528,8 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
      * TODO: support more granularity
      */
     
-
-    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n",
-           addr, is_write1, mmu_idx);
+    QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "ECPT Translate: addr=%" VADDR_PRIx " eip=%lx w=%d mmu=%d\n",
+           addr, env->eip, is_write1, mmu_idx);
 
     /**
      * TODO: 
@@ -760,6 +759,7 @@ retry:
 
     /* can the page can be put in the TLB?  prot will tell us */
     if (is_user && !(ptep & PG_USER_MASK)) {
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Checking prot is_user=%x !(ptep & PG_USER_MASK)=%x\n", is_user, !(ptep & PG_USER_MASK));
         goto do_fault_protect;
     }
 
@@ -804,6 +804,7 @@ retry:
     }
 
     if ((*prot & (1 << is_write1)) == 0) {
+        QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    Checking prot *prot=%x \n", *prot);
         goto do_fault_protect;
     }
 
@@ -1650,13 +1651,38 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
         pg_mode = get_pg_mode(env);
 #ifdef TARGET_X86_64_ECPT
     /* fill  */
+    /**
+     * NOTE: we set mmu_idx to MMU_KNOSMAP_IDX, which indicates privelege level of kernel access.
+     *  This is a hack to bypass warning message of fail to page table when dumping translation info in mmu_translate_ECPT.
+     *  What would happen is that at page fault time, we somehow get an incorrect mmu_idx (MMU_USER_IDX) but to access
+     *  a kernel address space (cpu_entry area). 
+     * 
+     * Example:
+     *  ECPT Translate: addr=fffffe0000000ec0 eip=40159e w=0 mmu=1
+     *  ECPT Translate: load from entry at 0x0000000002c88040 pte at 0x0000000002c88040 pte=0x8000000004290161 way=0
+     *  Checking prot is_user=1 !(ptep & PG_USER_MASK)=1
+     * 
+     * The page table query result here is correct, but protection check fails;
+     * as a result, we get incorrect paddr info which is recorded after the protection check.
+     * 
+     * Ideally, we should fix the mmu_idx fed here in translate_guest_virtual function (cputlb.c),
+     * but it seems like already have the correct cpu_mmu_idx function, so it seems more like a issue within 
+     * the QEMU plugin system. 
+     * The radix translation dump doesn't have this problem, because the implemented mmu_translate_pgtables function
+     * never checks user access or kernel access.
+     * 
+     * Our hack can serve as a temporary solution because address translation dump is to simulate performance;
+     * permissino correctness checks are properly checked at runtime (handle_mmu_fault) which has the correct mmu_idx.
+     */
+    mmu_idx = MMU_KNOSMAP_IDX;
     int page_size = 0;
     int error_code =
         mmu_translate_ECPT(cs, addr, get_hphys, MMU_DATA_LOAD, mmu_idx, pg_mode,
                            0, &paddr, &page_size, &prot, rec);
     
     if (error_code != PG_ERROR_OK) {
-        warn_report("ECPT fill pgtable failure: addr=%lx eip=%lx error_code=%d\n", addr, env->eip, error_code);
+        warn_report("ECPT fill pgtable failure: addr=%lx eip=%lx error_code=%d paddr=%lx page_size=%x prot=%x\n",
+                    addr, env->eip, error_code, paddr, page_size, prot);
     }
     return paddr;
 #else
