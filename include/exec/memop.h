@@ -136,7 +136,9 @@ static inline bool memop_big_endian(MemOp op)
 // #define PAGE_TABLE_LEAVES 12
 // #endif
 /* TODO fix this define */
-#define PAGE_TABLE_LEAVES 12
+#define PAGE_TABLE_LEAVES 6
+#define CWT_LEAVES 4
+
 #ifndef PAGE_TABLE_LEAVES
 #define PAGE_TABLE_LEAVES 4
 #endif
@@ -150,6 +152,8 @@ typedef struct MemRecord
 	uint64_t paddr;
 	uint64_t pte;
 	uint64_t leaves[PAGE_TABLE_LEAVES];
+
+    uint64_t cwt_leaves[CWT_LEAVES];
 } MemRecord;
 
 #endif

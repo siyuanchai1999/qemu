@@ -352,7 +352,7 @@ static void fix_cwc_from_cwt(CPUState *cs, hwaddr addr, hit_info_t hit_res)
     possible_ways will be filled. n_ways indicate its size.
     start and end indicate the range of ways to be filled.
 */
-static bool get_ECPT_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * n_ways, hit_info_t hit_res)
+static bool __get_ECPT_full_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * n_ways, hit_info_t hit_res, bool refill_cwc)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
@@ -362,8 +362,11 @@ static bool get_ECPT_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * 
         if (*n_ways < ECPT_KERNEL_WAY) {
             /* CWC fails to cover all ways*/
             /* TODO: optimize this by only querying the remaining ways  */
-            fill_all_kernel_ways(possible_ways, n_ways); 
-            fix_cwc_from_cwt(cs, addr, hit_res); 
+            fill_all_kernel_ways(possible_ways, n_ways);
+            if (refill_cwc) {
+                fix_cwc_from_cwt(cs, addr, hit_res); 
+            }
+            
         } else {
             /* cannot query more ways. Things not in page table */
             return false;                                                                                 
@@ -372,8 +375,10 @@ static bool get_ECPT_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * 
         if (*n_ways < ECPT_USER_WAY) {
             /* CWC fails to cover all ways*/
             /* TODO: optimize this by only querying the remaining ways */
-            fill_all_user_ways(possible_ways, n_ways);  
-            fix_cwc_from_cwt(cs, addr, hit_res);
+            fill_all_user_ways(possible_ways, n_ways); 
+            if (refill_cwc) {
+                fix_cwc_from_cwt(cs, addr, hit_res);
+            }
         } else {
             /* cannot query more ways. Things not in page table */
             return false;   
@@ -381,6 +386,15 @@ static bool get_ECPT_ways(CPUState *cs, hwaddr addr, int * possible_ways, int * 
     }
 
     return true;
+}
+
+static inline bool get_ECPT_full_ways_with_refill(CPUState *cs, hwaddr addr, int * possible_ways, int * n_ways, hit_info_t hit_res) {
+    return __get_ECPT_full_ways(cs, addr, possible_ways, n_ways, hit_res, true);
+}
+
+/* used in simulation mode, get all ECPT info */
+static inline bool get_ECPT_full_ways_no_refill(CPUState *cs, hwaddr addr, int * possible_ways, int * n_ways, hit_info_t hit_res) {
+    return __get_ECPT_full_ways(cs, addr, possible_ways, n_ways, hit_res, false);
 }
 
 static uint64_t * entry_to_pte_pointer(ecpt_entry_t * entry, hwaddr addr, enum Granularity gran) {
@@ -465,6 +479,35 @@ static uint64_t get_rehash_ptr(CPUX86State *env, int way)
     return env->ecpt_rehash_msr[way];
 }
 
+static inline void record_ecpt_leaf(MemRecord * rec, int w, hwaddr entry_addr)
+{
+    if (rec) {
+        if (w < ECPT_KERNEL_WAY) {
+            rec->leaves[w] = entry_addr;
+        } else {
+            rec->leaves[w - ECPT_KERNEL_WAY] = entry_addr;
+        }
+    }
+}
+
+static inline void record_cwt_visit(CPUState *cs, uint64_t vaddr, MemRecord * rec)
+{
+    cwt_entry_t matched_entries[CWT_TOTAL_N_WAY] = {0};
+	uint32_t n_matched_entries = 0;
+
+    if (rec) {
+        n_matched_entries = cwt_lookup(cs, vaddr, CWT_2MB, &matched_entries[0], rec);
+        if (n_matched_entries != 1) {
+            warn_report("CWT entry not found for vaddr=%lx gran=%d\n", vaddr, CWT_2MB);
+        }
+
+        n_matched_entries = cwt_lookup(cs, vaddr, CWT_1GB, &matched_entries[0], rec);
+        if (n_matched_entries != 1) {
+            warn_report("CWT entry not found for vaddr=%lx gran=%d\n", vaddr, CWT_1GB);
+        }
+    }
+}
+
 static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          int is_write1, int mmu_idx, int pg_mode, int gdb,
                          hwaddr *xlat, int *page_size, int *prot, MemRecord * rec)
@@ -516,9 +559,18 @@ static int mmu_translate_ECPT(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hp
     int possible_ways[ECPT_TOTAL_WAY];
     int n_ways = 0;
     bool new_way_filled = false;
+    hit_info_t hit_res = {};
 
     // get_ECPT_ways(cs, addr, possible_ways, &n_ways);
-    hit_info_t hit_res = fill_from_cwc(cs, addr, possible_ways, &n_ways);
+    if (rec == NULL ) {
+        /* run mode */
+        hit_res = fill_from_cwc(cs, addr, possible_ways, &n_ways);
+    } else {
+        /* simulation mode */
+        get_ECPT_full_ways_no_refill(cs, addr, possible_ways, &n_ways, hit_res);
+        record_cwt_visit(cs, addr, rec);
+    }
+    
 retry:
 
     pte = 0;
@@ -609,13 +661,8 @@ retry:
          /* do nothing for now, cuz nested paging is not enabled */
         entry_addr = GET_HPHYS(cs, entry_addr, MMU_DATA_STORE, NULL);
         
-        if (rec) {
-            assert(w < PAGE_TABLE_LEAVES);
-            rec->leaves[w] = entry_addr;
-        }
-
         load_helper(cs, (void *) &entry, entry_addr, sizeof(ecpt_entry_t));
-        
+        record_ecpt_leaf(rec, w, entry_addr);
         // PRINT_ECPT_ENTRY((&entry));
 
         if (ecpt_entry_match_vpn(&entry, vpn)) {
@@ -684,7 +731,7 @@ retry:
         way_found = -1;
 
         /* Try to fix it with new ways */
-        new_way_filled = get_ECPT_ways(cs, addr, possible_ways, &n_ways, hit_res);
+        new_way_filled = get_ECPT_full_ways_with_refill(cs, addr, possible_ways, &n_ways, hit_res);
         if (new_way_filled){
             goto retry;
         }

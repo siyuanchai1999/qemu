@@ -3,7 +3,7 @@
 
 #include "qemu/osdep.h"
 #include <stdint.h>
-
+#include "exec/memop.h"
 // #define PAGE_HEADER_MASK (0xffff000000000000)
 // #define PAGE_TAIL_MASK_4KB (0xfff)
 // #define PAGE_TAIL_MASK_2MB (0x1fffff)
@@ -416,6 +416,17 @@ extern cwc_cache_t cwc_pmd;
 bool cwc_lookup(cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, cwt_header_t * res);
 
 /**
+ * @brief lookup from cwt 
+ * 
+ * @param cs CPUState
+ * @param vaddr virtual addr
+ * @param gran CWT granularity
+ * @param matched_entries matched
+ * @param rec memory record to record cwt accesses. NULL when not running in address dump mode
+ * @return int number of matched entries
+ */
+uint32_t cwt_lookup(CPUState *cs, uint64_t vaddr, CWTGranularity gran, cwt_entry_t * matched_entries, MemRecord * rec);
+/**
  * @brief fetch CWT entry into CWC. Replace last recently used entry.
  * 	CWT lookup involves a cuckoo hash lookup.
  *  return 0 if found, -1 otherwise.
@@ -425,5 +436,6 @@ bool cwc_lookup(cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, cwt_heade
  * @param gran CWT granularity (2MB or 1GB)
  */
 int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, bool cwc_stale);
+
 
 #endif /* ECPT_H */

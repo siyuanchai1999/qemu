@@ -209,26 +209,34 @@ static void cwc_update_stale_helper(cwc_cache_t *cwc, cwt_entry_t * replacement,
 	QEMU_LOG_TRANSLATE("CWT: update stale stale_entry=%d replace_vpn=%lx\n", i, cwt_entry_get_vpn(replacement));
 }
 
-// void cwc_update_stale()
 
-int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, bool cwc_stale)
+static inline void record_cwt_leaf(MemRecord * rec, int w, hwaddr entry_addr)
+{
+    if (rec) {
+        if (w < CWT_KERNEL_WAY) {
+            rec->cwt_leaves[w] = entry_addr;
+        } else {
+            rec->cwt_leaves[w - CWT_KERNEL_WAY] = entry_addr;
+        }
+    }
+}
+
+
+uint32_t cwt_lookup(CPUState *cs, uint64_t vaddr, CWTGranularity gran, cwt_entry_t * matched_entries , MemRecord * rec)
 {
 	X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
-	/* get lru entry to be replaced */
-	
-	
-	/* get the way range */
+
 	uint32_t way_start = 0, way_end = 0, way = 0;
 	uint64_t vpn = 0;
+
 	cwt_select_way(vaddr, gran, is_kernel_addr(env, vaddr), &way_start,
 					&way_end, &vpn);
-	
-	cwt_entry_t cwt_entry = {0};
-	cwt_entry_t matched_entries[CWT_TOTAL_N_WAY] = {0};
-	uint32_t n_matched_entries = 0;
+    cwt_entry_t cwt_entry = {0};
+    uint32_t n_matched_entries = 0;
 
-	for (way = way_start; way < way_end; way++) {
+
+    for (way = way_start; way < way_end; way++) {
 		uint64_t cr = 0, size = 0, hash = 0;
 		uint64_t rehash_ptr = 0;
 		hwaddr cwt_entry_addr = 0;
@@ -254,7 +262,9 @@ int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularit
 			cwt_entry_addr = (hwaddr) &cwt_base[hash];
 		}
 		
+        
 		load_helper(cs, (void *) &cwt_entry, cwt_entry_addr, sizeof(cwt_entry_t));
+        record_cwt_leaf(rec, way, cwt_entry_addr);
 
 		QEMU_LOG_TRANSLATE(
 			"\tCWT: base at 0x%016lx load from 0x%016lx entry_vpn=%lx valid_num=%d\n",
@@ -265,11 +275,26 @@ int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularit
 			matched_entries[n_matched_entries++] = cwt_entry;
 		}
     }
+
+    if (n_matched_entries == 0) {
+        QEMU_LOG_TRANSLATE("no matched entry found in CWT for vaddr=%lx vpn=0x%lx\n", vaddr, vpn);
+    }
+
+    return n_matched_entries;
+}
+
+
+int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, bool cwc_stale)
+{
+	cwt_entry_t matched_entries[CWT_TOTAL_N_WAY] = {0};
+	uint32_t n_matched_entries = 0;
+
+    n_matched_entries = cwt_lookup(cs, vaddr, gran, &matched_entries[0], NULL);
 	
 	assert(n_matched_entries <= 1);
 
 	if (n_matched_entries == 0) {
-		QEMU_LOG_TRANSLATE("no matched entry found in CWT for vaddr=%lx vpn=0x%lx\n", vaddr, vpn);
+		// QEMU_LOG_TRANSLATE("no matched entry found in CWT for vaddr=%lx vpn=0x%lx\n", vaddr, vpn);
 		return -1;
 	} else {
 		
