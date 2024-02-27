@@ -104,9 +104,9 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
 		
 		// cr3_invalid_mask = (((~0ULL) << env_archcpu(env)->phys_bits) & ~CR3_TRANSITION_BIT);
 #ifdef TARGET_X86_64_ECPT
-        uint64_t cr3_invalid_mask = 0;
+        {
         /* for ecpt we use all 64 bits available */
-        cr3_invalid_mask =
+        uint64_t cr3_invalid_mask =
             (((~0ULL) << (env_archcpu(env)->phys_bits + ECPT_DESC_SHIFT)) &
              ~CR3_TRANSITION_BIT);
         qemu_log_mask(CPU_LOG_MMU, "phys_bits=%d mask=%lx\n",
@@ -115,6 +115,7 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         if ((env->efer & MSR_EFER_LMA) &&
                 (t0 & cr3_invalid_mask)) {
             cpu_vmexit(env, SVM_EXIT_ERR, 0, GETPC());
+        }
         }
 #else
         if ((env->efer & MSR_EFER_LMA) &&

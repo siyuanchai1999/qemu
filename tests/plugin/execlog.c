@@ -155,7 +155,7 @@ static inline void instant_suicide(void)
 	// It is unique enough that no one will confuse it with
 	//   the everyday old friend "Segmentation fault (core dumped)"
 	asm volatile ("ud2" ::: "memory"); // #UD
-	asm volatile ("int1" ::: "memory"); // #DB
+	// asm volatile ("int1" ::: "memory"); // #DB
 	asm volatile ("int3" ::: "memory"); // #BP
 	asm volatile ("hlt" ::: "memory"); // #GP
 	asm volatile ("xorq %%rax, %%rax\n\tidivq %%rax" ::: "memory"); // #DE
