@@ -3,10 +3,11 @@
 
 #include "ECPT_utils.h"
 
-#define QEMU_LOG_TRANSLATE(FMT, ...)   \
+#define QEMU_LOG_TRANSLATE(FMT, ...)
+/* #define QEMU_LOG_TRANSLATE(FMT, ...)   \
     do {                                                \
             qemu_log_mask(CPU_LOG_MMU, FMT, ## __VA_ARGS__); \
-    } while (0)
+    } while (0) */
 
 // uint32_t way_to_crN[ECPT_MAX_WAY]= {3,1,5,6,7,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23};
 uint32_t way_to_crN[ECPT_MAX_WAY]= {3,1,5,6,7,9,10,11,12,13,14,15};
@@ -221,6 +222,19 @@ static inline void record_cwt_leaf(MemRecord * rec, int w, hwaddr entry_addr)
     }
 }
 
+static inline void record_cwt_header(MemRecord * rec, hwaddr vaddr, CWTGranularity gran, cwt_entry_t * entry)
+{
+    if (rec) {
+        uint32_t idx =  cwt_get_idx_from_vaddr(vaddr, gran);
+		cwt_header_t header = entry->sec_headers[idx];
+		if (gran == CWT_2MB) {
+			rec->pmd_cwt_header = header.byte;
+		} else if (gran == CWT_1GB) {
+			rec->pud_cwt_header = header.byte;
+		}
+	}
+}
+
 
 uint32_t cwt_lookup(CPUState *cs, uint64_t vaddr, CWTGranularity gran, cwt_entry_t * matched_entries , MemRecord * rec)
 {
@@ -273,6 +287,11 @@ uint32_t cwt_lookup(CPUState *cs, uint64_t vaddr, CWTGranularity gran, cwt_entry
 		if (cwt_entry_match_vpn(&cwt_entry, vpn) && cwt_entry_get_valid_header_num(&cwt_entry) > 0) {
 			/* this should only have one matched entries, but record all for error checking */
 			matched_entries[n_matched_entries++] = cwt_entry;
+			record_cwt_header(rec, vaddr, gran, &cwt_entry);
+			
+			if (n_matched_entries > 1) {
+				warn_report("cwt_lookup: too many matched entries vaddr=%lx\n", vaddr);
+			}
 		}
     }
 

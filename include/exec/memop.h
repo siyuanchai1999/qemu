@@ -154,6 +154,8 @@ typedef struct MemRecord
 	uint64_t leaves[PAGE_TABLE_LEAVES];
 
     uint64_t cwt_leaves[CWT_LEAVES];
+    uint8_t pmd_cwt_header;
+    uint8_t pud_cwt_header;
 } MemRecord;
 
 #endif
