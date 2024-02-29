@@ -9,6 +9,7 @@
 
 #include <glib.h>
 #include <inttypes.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -36,6 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
+#define MAX_INS_COUNT (1000000000UL) // 1 billion
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
@@ -303,10 +305,16 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 	write_mem_record(&rec);
 }
 
-static void do_ins_counting(void)
+#define IS_KERNEL_ADDR(addr) ((addr) >= 0xffff800000000000UL)
+static void do_ins_counting(uint64_t ins_pc)
 {
-	ins_counter++;
+    if (IS_KERNEL_ADDR(ins_pc)) {
+        /* skip counting for kernel insts */
+        return;
+    }
 
+	ins_counter++;
+    
     if(ins_counter % 5000000UL == 0) { // every 5 million instr
         printf("[Sim Plugin] Reached %lu instrs\n", ins_counter);
     }
@@ -365,13 +373,13 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
         return;
     }
 
-	do_ins_counting();
+	do_ins_counting(ins_pc);
 
 	if (ins_fetched[cpu] == ins_line) {
-	if (BIN_RECORD_INCL_DECD)
-	vcpu_insn_exec(cpu_index, udata);
-
-	return;
+	    if (BIN_RECORD_INCL_DECD) {
+            vcpu_insn_exec(cpu_index, udata);
+        }
+	    return;
 	}
 
 	ins_fetched[cpu] = ins_line;
