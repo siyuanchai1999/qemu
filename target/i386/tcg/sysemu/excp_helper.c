@@ -723,6 +723,15 @@ retry:
             QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "    ECPT Translate: Elastic load from entry at 0x%016lx pte at 0x%016lx pte=0x%016lx rehash_way=%d\n",
                 entry_found_addr, pte_addr, pte, way_found);
         }
+
+        if (rec) {
+            if (way_found < ECPT_KERNEL_WAY) {
+                rec->selected_ecpt_way = way_found;
+            } else {
+                rec->selected_ecpt_way = way_found - ECPT_KERNEL_WAY;
+            }
+        }
+
     } else {
         pte = 0;
         entry_found_addr = 0;
