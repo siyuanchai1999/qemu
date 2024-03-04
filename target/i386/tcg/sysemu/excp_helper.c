@@ -25,11 +25,16 @@
 #include "excp_helper.h"
 #include "ECPT_hash.h"
 #include "ECPT.h"
-#include "ECPT_utils.h"
+
+
 
 #include "build/x86_64-softmmu-config-target.h"
 #include <assert.h>
 #include <stdint.h>
+
+#ifdef TARGET_X86_64_ECPT
+#include "ECPT_utils.h"
+#endif 
 
 #define QEMU_LOG_TRANSLATE(gdb, MASK, FMT, ...)   \
     do {                                                \
@@ -1648,7 +1653,7 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
     int pg_mode;
     hwaddr paddr;
     MemRecord * rec = (MemRecord *) trans_info;
-    int prot;
+    
 
     if (!(env->cr[0] & CR0_PG_MASK)) {
         paddr = addr;
@@ -1659,7 +1664,7 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
     } else {
         pg_mode = get_pg_mode(env);
 #ifdef TARGET_X86_64_ECPT
-    /* fill  */
+    int prot;
     /**
      * NOTE: we set mmu_idx to MMU_KNOSMAP_IDX, which indicates privelege level of kernel access.
      *  This is a hack to bypass warning message of fail to page table when dumping translation info in mmu_translate_ECPT.

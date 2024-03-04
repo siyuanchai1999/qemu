@@ -7,6 +7,9 @@ i386_softmmu_ss.add(when: ['CONFIG_TCG', 'CONFIG_SOFTMMU'], if_true: files(
   'fpu_helper.c',
   'svm_helper.c',
   'seg_helper.c',
+))
+
+i386_softmmu_ss.add(when: ['CONFIG_TCG', 'CONFIG_SOFTMMU', 'TARGET_X86_64_ECPT'], if_true: files(
   'ECPT_hash.c',
   'ECPT.c',
 ))
