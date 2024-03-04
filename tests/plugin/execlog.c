@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-#define MAX_INS_COUNT (1000000000UL) // 1 billion
+// #define MAX_INS_COUNT (1000000000UL) // 1 billion
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
@@ -131,7 +131,8 @@ typedef union BinaryRecord
 
 static bool start_logging = false;
 static FileHandle log_handle = { 0 };
-static uint64_t ins_counter = 0;
+static uint64_t user_ins_counter = 0;
+static uint64_t kernel_ins_counter = 0;
 static uint64_t ins_fetched[MAX_CPU_COUNT] = { 0 };
 
 //
@@ -310,18 +311,20 @@ static void do_ins_counting(uint64_t ins_pc)
 {
     if (IS_KERNEL_ADDR(ins_pc)) {
         /* skip counting for kernel insts */
+        kernel_ins_counter++;
         return;
     }
 
-	ins_counter++;
+	user_ins_counter++;
     
-    if(ins_counter % 5000000UL == 0) { // every 5 million instr
-        printf("[Sim Plugin] Reached %lu instrs\n", ins_counter);
+    if(user_ins_counter % 5000UL == 0) { // every 5 million instr
+        printf("[Sim Plugin] Reached  %lu user instrs %lu kernel insts\n", 
+            user_ins_counter, kernel_ins_counter);
     }
 
-	if (ins_counter > MAX_INS_COUNT) {
+	if (user_ins_counter > MAX_INS_COUNT) {
 		start_logging = false;
-		ins_counter = 0;
+		user_ins_counter = 0;
 
 		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
 
@@ -354,7 +357,7 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 	rec.cpu = cpu_index;
 	rec.opcode = *((uint32_t *)qemu_plugin_insn_data(ins));
 	rec.vaddr = qemu_plugin_insn_vaddr(ins);
-	rec.counter = ins_counter;
+	rec.counter = user_ins_counter;
 
 	write_ins_record(&rec, dias);
 }
