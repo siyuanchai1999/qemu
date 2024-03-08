@@ -1076,6 +1076,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 
 // TODO: change this to the corresponding ECTP version
 // schai. I believe this can reuse the mmu_translate_ECPT function 
+__attribute__((unused))
 static unsigned long mmu_translate_pgtables(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                                             uint64_t cr3,int mmu_idx, int pg_mode,
                                             unsigned long *pgd, unsigned long *pud, unsigned long *pmd,
