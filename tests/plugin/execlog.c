@@ -447,6 +447,7 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 			// xchg R10, R10
             target_cr3 = qemu_plugin_read_cr3();
             printf("[Sim Plugin] Begin simulation, cr3=%lx\n", target_cr3);
+            printf("[Sim Plugin] MemRecord size=%lu\n", sizeof(MemRecord)); 
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r10,
 												QEMU_PLUGIN_CB_NO_REGS,
 												NULL);

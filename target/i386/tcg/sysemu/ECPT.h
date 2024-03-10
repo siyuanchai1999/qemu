@@ -3,7 +3,8 @@
 
 #include "qemu/osdep.h"
 #include <stdint.h>
-#include "exec/memop.h"
+#include "MemRecord.h"
+
 // #define PAGE_HEADER_MASK (0xffff000000000000)
 // #define PAGE_TAIL_MASK_4KB (0xfff)
 // #define PAGE_TAIL_MASK_2MB (0x1fffff)
@@ -436,6 +437,8 @@ uint32_t cwt_lookup(CPUState *cs, uint64_t vaddr, CWTGranularity gran, cwt_entry
  * @param gran CWT granularity (2MB or 1GB)
  */
 int fetch_from_cwt(CPUState *cs, cwc_cache_t *cwc, uint64_t vaddr, CWTGranularity gran, bool cwc_stale);
+
+
 
 
 #endif /* ECPT_H */
