@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-// #define MAX_INS_COUNT (1000000000UL) // 1 billion
+#define MAX_INS_COUNT (2000000000UL) // 2 billion
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
@@ -317,7 +317,7 @@ static void do_ins_counting(uint64_t ins_pc)
 
 	user_ins_counter++;
     
-    if(user_ins_counter % 5000UL == 0) { // every 5 million instr
+    if(user_ins_counter % 100000UL == 0) { // every 100 k instr
         printf("[Sim Plugin] Reached  %lu user instrs %lu kernel insts\n", 
             user_ins_counter, kernel_ins_counter);
     }
@@ -327,7 +327,7 @@ static void do_ins_counting(uint64_t ins_pc)
 		user_ins_counter = 0;
 
 		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
-
+        printf("[Sim Plugin] Total simulated %lu user instrs %lu kernel insts\n", user_ins_counter, kernel_ins_counter);
         close_bin_record();
 
         printf("[Sim Plugin] Preparing to die\n");
@@ -369,7 +369,8 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 {
 	uint32_t cpu = cpu_index % MAX_CPU_COUNT;
 	uint64_t ins_pc = (uint64_t) udata;
-    uint64_t ins_line = ins_pc & FRONTEND_FETCH_MASK;
+    uint64_t ins_line = ins_pc;
+    // uint64_t ins_line = ins_pc & FRONTEND_FETCH_MASK;
     MemRecord rec = { 0 };
 
     if (!should_do_logging()) {
@@ -378,12 +379,12 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 
 	do_ins_counting(ins_pc);
 
-	if (ins_fetched[cpu] == ins_line) {
-	    if (BIN_RECORD_INCL_DECD) {
-            vcpu_insn_exec(cpu_index, udata);
-        }
-	    return;
-	}
+	// if (ins_fetched[cpu] == ins_line) {
+	//     if (BIN_RECORD_INCL_DECD) {
+    //         vcpu_insn_exec(cpu_index, udata);
+    //     }
+	//     return;
+	// }
 
 	ins_fetched[cpu] = ins_line;
 
@@ -412,6 +413,7 @@ static void vcpu_magic_r10(unsigned int cpu, void *udata) {
 static void vcpu_magic_r11(unsigned int cpu, void *udata) {
 	start_logging = false;
     printf("[Sim Plugin] magic instruction r11 is executed!\n");
+    printf("[Sim Plugin] Total simulated %lu user instrs %lu kernel insts\n", user_ins_counter, kernel_ins_counter);
     if (flush_to_disk(log_handle.fp) < 0) {
         instant_suicide();
     }
