@@ -53,6 +53,13 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
 
 static char bin_record_file_name[PATH_MAX];
+static bool k_exec_only = false;
+static bool prev_is_user = false;
+
+
+// static uint32_t start_cmd = 0xD2874DU; /* xchg R10, R10 */
+// static uint32_t stop_cmd = 0xDB874DU; /* xchg R11, R11 */
+
 static unsigned long target_cr3;
 
 // Whether to include instruction decode results
@@ -282,6 +289,11 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
         return;
     }
 
+    if (k_exec_only) {
+        /* only record kernel exec inst */
+        return;
+    }
+
 	/* store: 0, load: 1*/
 	rec.access_rw = !qemu_plugin_mem_is_store(info);
 	rec.access_cpu = cpu_index % MAX_CPU_COUNT; /* dummy field for now. introduced because of different QEMU version @jiyuan */
@@ -309,6 +321,11 @@ static void vcpu_mem(unsigned int cpu_index, qemu_plugin_meminfo_t info,
 #define IS_KERNEL_ADDR(addr) ((addr) >= 0xffff800000000000UL)
 static void do_ins_counting(uint64_t ins_pc)
 {
+    uint64_t mod_base = 100000UL;
+    if (k_exec_only) {
+        mod_base *= 20;
+    }
+
     if (IS_KERNEL_ADDR(ins_pc)) {
         /* skip counting for kernel insts */
         kernel_ins_counter++;
@@ -317,17 +334,20 @@ static void do_ins_counting(uint64_t ins_pc)
 
 	user_ins_counter++;
     
-    if(user_ins_counter % 100000UL == 0) { // every 100 k instr
+
+    if(user_ins_counter % mod_base == 0) { // every 100 k instr
         printf("[Sim Plugin] Reached  %lu user instrs %lu kernel insts\n", 
             user_ins_counter, kernel_ins_counter);
     }
 
 	if (user_ins_counter > MAX_INS_COUNT) {
 		start_logging = false;
-		user_ins_counter = 0;
+		
 
 		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
         printf("[Sim Plugin] Total simulated %lu user instrs %lu kernel insts\n", user_ins_counter, kernel_ins_counter);
+        
+        user_ins_counter = 0;
         close_bin_record();
 
         printf("[Sim Plugin] Preparing to die\n");
@@ -362,6 +382,24 @@ static void vcpu_insn_exec(unsigned int cpu_index, void *udata)
 	write_ins_record(&rec, dias);
 }
 
+static int should_record_insn_fetch(uint64_t ins_pc)
+{
+    if (k_exec_only) {
+        if (IS_KERNEL_ADDR(ins_pc)) {
+            prev_is_user = false;
+            return 1;
+        } else {
+            if (prev_is_user) {
+                return 0;
+            } else {
+                prev_is_user = true;
+                return 1;
+            }
+        }
+    }
+    return 1;
+}
+
 /**
 * Log frontend instruction fetch
 */
@@ -377,7 +415,11 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
         return;
     }
 
-	do_ins_counting(ins_pc);
+    do_ins_counting(ins_pc);
+
+    if (!should_record_insn_fetch(ins_pc)) {
+        return;
+    }
 
 	// if (ins_fetched[cpu] == ins_line) {
 	//     if (BIN_RECORD_INCL_DECD) {
@@ -581,6 +623,8 @@ static int find_option(const char *key, char **value) {
     *value = NULL;
     return 0;
 }
+
+
 static void setup_bin_record_name(void) {
     char *input_filename;
     int found = find_option("filename", &input_filename);
@@ -593,6 +637,26 @@ static void setup_bin_record_name(void) {
 		}
         printf("[Sim Plugin] Set log file to \"%s\"\n", input_filename);
 		strcpy(bin_record_file_name, input_filename);
+    }
+}
+
+
+static void setup_k_only(void) {
+    char *k_only_str;
+    int found = find_option("k_exec_only", &k_only_str);
+
+    if(found == 0) {
+        printf("[Sim Plugin] Did not find plugin argument k_exec_only, use default k_exec_only = %d \n", k_exec_only);
+    } else {
+        if (streq(k_only_str, "1")) {
+            k_exec_only = true;
+            printf("[Sim Plugin] Set k_exec_only option to %d\n", k_exec_only);
+        } else if (streq(k_only_str, "0")) {
+            k_exec_only = false;
+            printf("[Sim Plugin] Set k_exec_only option to %d\n", k_exec_only);
+        } else {
+            error_exit("[Sim Plugin] k_exec_only option invalid %s\n", k_only_str);
+        }
     }
 }
 
@@ -617,6 +681,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 {
     process_argv(argc, argv);
 	setup_bin_record_name();
+    setup_k_only();
 
 	open_bin_record();
 
