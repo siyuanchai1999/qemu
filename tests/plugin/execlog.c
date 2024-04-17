@@ -265,14 +265,14 @@ static int should_do_logging(void)
         return 0;
     }
 
-    if (qemu_plugin_read_cr3() != target_cr3) {
-#ifdef DEBUG_EXECLOG    
-        char buf[256];
-        sprintf(buf, "[Sim Plugin] vcpu_mem: cr3=%lx, target_cr3=%lx\n", qemu_plugin_read_cr3(), target_cr3);
-        qemu_plugin_outs(buf);
-#endif
-        return 0;
-    }
+//     if (qemu_plugin_read_cr3() != target_cr3) {
+// #ifdef DEBUG_EXECLOG    
+//         char buf[256];
+//         sprintf(buf, "[Sim Plugin] vcpu_mem: cr3=%lx, target_cr3=%lx\n", qemu_plugin_read_cr3(), target_cr3);
+//         qemu_plugin_outs(buf);
+// #endif
+//         return 0;
+//     }
     
     return 1;
 }
