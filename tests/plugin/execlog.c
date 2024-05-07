@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-#define MAX_INS_COUNT (2000000000UL) // 2 billion
+#define MAX_INS_COUNT (INT_MAX) // 2 billion
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
@@ -250,7 +250,7 @@ static inline void write_ins_record(InsRecord *rec, char* dias)
 static inline void write_ins_fetch(MemRecord *rec)
 {
 	rec->header = BIN_RECORD_TYPE_FEC;
-	write_bin_log(sizeof(MemRecord), rec);
+	//write_bin_log(sizeof(MemRecord), rec);
 
 #ifdef DEBUG_EXECLOG    
     char buf[1024];
