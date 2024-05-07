@@ -231,7 +231,7 @@ static inline void write_bin_log(uint64_t size, void* data)
 static inline void write_mem_record(MemRecord *rec)
 {
 	rec->header = BIN_RECORD_TYPE_MEM;
-	write_bin_log(sizeof(MemRecord), rec);
+	// write_bin_log(sizeof(MemRecord), rec);
 }
 
 static inline void write_ins_record(InsRecord *rec, char* dias)
