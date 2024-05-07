@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-#define MAX_INS_COUNT (INT_MAX) // 2 billion
+#define MAX_INS_COUNT (LONG_MAX) // 2 billion
 #ifndef MAX_INS_COUNT
 #define MAX_INS_COUNT (3000000000UL) // 3 billion
 #endif
