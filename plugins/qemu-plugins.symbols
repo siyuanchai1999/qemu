@@ -45,4 +45,5 @@
   qemu_plugin_pa_by_va;
   qemu_plugin_read_cr3;
   qemu_plugin_vm_shutdown;
+  qemu_plugin_tb_flush;
 };

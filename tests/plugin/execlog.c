@@ -495,6 +495,9 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r10,
 												QEMU_PLUGIN_CB_NO_REGS,
 												NULL);
+
+            printf("[Sim Plugin] tb flush\n");
+            qemu_plugin_tb_flush();
 		} else if(raw_insn == 0xDB874DU) {
 			// XCHG R11, R11
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r11,
@@ -508,17 +511,19 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
              * Otherwise, the the translation blocks translated before start_logging=true
              * will not be logged since it will not be translated again.
             */
+            if (start_logging) {
+                /* Register callback on memory read or write */
+                qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
+                                                QEMU_PLUGIN_CB_NO_REGS,
+                                                QEMU_PLUGIN_MEM_RW, (void *) insn_vaddr);
 
-            /* Register callback on memory read or write */
-            qemu_plugin_register_vcpu_mem_cb(insn, vcpu_mem,
-                                            QEMU_PLUGIN_CB_NO_REGS,
-                                            QEMU_PLUGIN_MEM_RW, (void *) insn_vaddr);
+                /* Register callback on instruction */
 
-            /* Register callback on instruction */
-
-            qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
-                                                QEMU_PLUGIN_CB_NO_REGS, (void *) insn_vaddr);
-		}
+                qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_insn_fetch,
+                                                    QEMU_PLUGIN_CB_NO_REGS, (void *) insn_vaddr);
+            }
+        
+        }
 	}
 }
 ////////////////////////////////////////////////////////////////////////////////

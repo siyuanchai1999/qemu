@@ -47,6 +47,8 @@
 #include "hw/boards.h"
 #endif
 #include "trace/mem.h"
+#include "exec/exec-all.h"
+
 
 /* Uninstall and Reset handlers */
 
@@ -344,6 +346,13 @@ void qemu_plugin_vm_shutdown(void)
 {
     qemu_system_shutdown_request(SHUTDOWN_CAUSE_GUEST_PANIC);
 }
+
+void qemu_plugin_tb_flush(void)
+{
+    CPUState *cpu = current_cpu;
+    tb_flush(cpu);
+}
+
 
 const char *qemu_plugin_hwaddr_device_name(const struct qemu_plugin_hwaddr *h)
 {

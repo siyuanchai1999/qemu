@@ -488,6 +488,7 @@ unsigned long qemu_plugin_pa_by_va(const unsigned long vaddr, void * trans_info)
 
 unsigned long qemu_plugin_read_cr3(void);
 void qemu_plugin_vm_shutdown(void);
+void qemu_plugin_tb_flush(void);
 
 typedef void
 (*qemu_plugin_vcpu_mem_cb_t)(unsigned int vcpu_index,
