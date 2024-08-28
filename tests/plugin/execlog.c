@@ -450,6 +450,9 @@ static void vcpu_insn_fetch(unsigned int cpu_index, void *udata)
 static void vcpu_magic_r10(unsigned int cpu, void *udata) {
 	start_logging = true;
     printf("[Sim Plugin] magic instruction r10 is executed!\n");
+
+    printf("[Sim Plugin] tb flush\n");
+    qemu_plugin_tb_flush();
 }
 
 static void vcpu_magic_r11(unsigned int cpu, void *udata) {
@@ -496,8 +499,7 @@ static void vcpu_tb_trans(qemu_plugin_id_t id, struct qemu_plugin_tb *tb)
 												QEMU_PLUGIN_CB_NO_REGS,
 												NULL);
 
-            printf("[Sim Plugin] tb flush\n");
-            qemu_plugin_tb_flush();
+            
 		} else if(raw_insn == 0xDB874DU) {
 			// XCHG R11, R11
 			qemu_plugin_register_vcpu_insn_exec_cb(insn, vcpu_magic_r11,
