@@ -37,10 +37,8 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-#define MAX_INS_COUNT (2000000000UL) // 2 billion
-#ifndef MAX_INS_COUNT
-#define MAX_INS_COUNT (3000000000UL) // 3 billion
-#endif
+#define DEFAULT_MAX_INS_COUNT (3000000000UL) // 3 billion
+static unsigned long max_ins_count; 
 
 // CPU instruction fetcher batch size
 #ifndef FRONTEND_FETCH_SIZE
@@ -340,11 +338,11 @@ static void do_ins_counting(uint64_t ins_pc)
             user_ins_counter, kernel_ins_counter);
     }
 
-	if (user_ins_counter > MAX_INS_COUNT) {
+	if (user_ins_counter + kernel_ins_counter > max_ins_count) {
 		start_logging = false;
 		
 
-		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", MAX_INS_COUNT);
+		printf("[Sim Plugin] # of instructions is over %ld, stop logging now\n", max_ins_count);
         printf("[Sim Plugin] Total simulated %lu user instrs %lu kernel insts\n", user_ins_counter, kernel_ins_counter);
         
         user_ins_counter = 0;
@@ -667,6 +665,20 @@ static void setup_k_only(void) {
     }
 }
 
+static void setup_max_inst(void) {
+    char *input_max_ins, *end_input_max_ins;
+    int found = find_option("max_inst", &input_max_ins);
+    if(found == 0) {
+        printf("[Sim Plugin] Did not find plugin argument max_inst, use default max_inst: %lu\n", DEFAULT_MAX_INS_COUNT);
+        max_ins_count = DEFAULT_MAX_INS_COUNT;
+    } else {
+        max_ins_count = strtoul(input_max_ins, &end_input_max_ins, 10); 
+        if (max_ins_count == 0 && input_max_ins == end_input_max_ins) {
+            error_exit("[Sim Plugin] Invalid input to -max_inst flag: \"%s\"\n", input_max_ins);
+        }
+        printf("[Sim Plugin] Set max_inst to %lu\n", max_ins_count);
+    }
+}
 
 static void plugin_exit(qemu_plugin_id_t id, void *p)
 {
@@ -689,6 +701,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
     process_argv(argc, argv);
 	setup_bin_record_name();
     setup_k_only();
+    setup_max_inst();
 
 	open_bin_record();
 
