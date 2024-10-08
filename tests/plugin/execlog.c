@@ -37,7 +37,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_version = QEMU_PLUGIN_VERSION;
 #endif
                        
 // Maximum number of instruction recorded
-#define DEFAULT_MAX_INS_COUNT (3000000000UL) // 3 billion
+#define DEFAULT_MAX_INS_COUNT (2000000000UL) // 2 billion
 static unsigned long max_ins_count; 
 
 // CPU instruction fetcher batch size
@@ -338,7 +338,7 @@ static void do_ins_counting(uint64_t ins_pc)
             user_ins_counter, kernel_ins_counter);
     }
 
-	if (user_ins_counter + kernel_ins_counter > max_ins_count) {
+	if (user_ins_counter > max_ins_count) {
 		start_logging = false;
 		
 
