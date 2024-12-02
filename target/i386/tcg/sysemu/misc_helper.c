@@ -27,6 +27,8 @@
 
 #include "qemu/log.h"
 #include "ECPT.h"
+#include "fpt.h"
+
 
 void helper_outb(CPUX86State *env, uint32_t port, uint32_t data)
 {
@@ -109,6 +111,20 @@ void helper_write_crN(CPUX86State *env, int reg, target_ulong t0)
         uint64_t cr3_invalid_mask =
             (((~0ULL) << (env_archcpu(env)->phys_bits + ECPT_DESC_SHIFT)) &
              ~CR3_TRANSITION_BIT);
+        qemu_log_mask(CPU_LOG_MMU, "phys_bits=%d mask=%lx\n",
+                      env_archcpu(env)->phys_bits, cr3_invalid_mask);
+
+        if ((env->efer & MSR_EFER_LMA) &&
+                (t0 & cr3_invalid_mask)) {
+            cpu_vmexit(env, SVM_EXIT_ERR, 0, GETPC());
+        }
+        }
+#elif defined (TARGET_X86_64_FPT)
+        {
+        /* for ecpt we use all 64 bits available */
+        uint64_t cr3_invalid_mask =
+            (((~0ULL) << (env_archcpu(env)->phys_bits)) &
+             ~CR3_L4_L3_FOLDED_BIT);
         qemu_log_mask(CPU_LOG_MMU, "phys_bits=%d mask=%lx\n",
                       env_archcpu(env)->phys_bits, cr3_invalid_mask);
 
@@ -353,6 +369,16 @@ void helper_wrmsr(CPUX86State *env)
         }
 #endif
 
+#ifdef TARGET_X86_64_FPT
+
+        if ((uint32_t)env->regs[R_ECX] == MSR_KERNEL_START) {
+            env->kernel_start = val;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "write kernel_start=%lx\n", env->kernel_start);
+            break;
+        }
+#endif
+
         if ((uint32_t)env->regs[R_ECX] >= MSR_MC0_CTL
             && (uint32_t)env->regs[R_ECX] < MSR_MC0_CTL +
             (4 * env->mcg_cap & 0xff)) {
@@ -541,6 +567,16 @@ void helper_rdmsr(CPUX86State *env)
                             "read cwt_msr[%d]=%lx\n", offset, val);
             break;
         }
+
+        if ((uint32_t)env->regs[R_ECX] == MSR_KERNEL_START) {
+            val = env->kernel_start;
+            qemu_log_mask(CPU_LOG_MMU,
+                            "read kernel_start=%lx\n", val);
+            break;
+        }
+#endif
+
+#ifdef TARGET_X86_64_FPT
 
         if ((uint32_t)env->regs[R_ECX] == MSR_KERNEL_START) {
             val = env->kernel_start;

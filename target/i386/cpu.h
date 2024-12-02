@@ -548,6 +548,20 @@ typedef enum X86Seg {
     #define MSR_KERNEL_START              0x00004100
 #endif
 
+
+#ifdef TARGET_X86_64_FPT
+    // #define MSR_ECPT_START                0x00004000
+    // #define MSR_ECPT_END                  (MSR_ECPT_START + ECPT_MAX_WAY)
+
+    // #define MSR_ECPT_REHASH_START         0x00004020
+    // #define MSR_ECPT_REHASH_END           (MSR_ECPT_REHASH_START + ECPT_MAX_WAY)
+
+    // #define MSR_CWT_START                0x00004040
+    // #define MSR_CWT_END                  (MSR_CWT_START + CWT_MAX_WAY)
+
+    #define MSR_KERNEL_START              0x00004100
+#endif
+
 #define XSTATE_FP_BIT                   0
 #define XSTATE_SSE_BIT                  1
 #define XSTATE_YMM_BIT                  2
@@ -1487,6 +1501,12 @@ typedef struct CPUX86State {
 
     uint64_t kernel_start;
 #endif
+
+#ifdef TARGET_X86_64_FPT
+    
+    uint64_t kernel_start;
+#endif
+
 
 	int32_t a20_mask;
 
